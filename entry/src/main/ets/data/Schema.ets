@@ -81,6 +81,11 @@ export const DDL: string[] = [
      front       TEXT    NOT NULL,
      back        TEXT    NOT NULL DEFAULT '',
      title       TEXT    NOT NULL DEFAULT '',
+     -- 选择题的选项(每项一行)与答案字母。
+     -- 单独存而不是留在 front 里,是因为 ;;;B 的收尾行本身就是答案,
+     -- 留在正面等于把答案印在题面上。答案必须物理离开 front。
+     options     TEXT    NOT NULL DEFAULT '',
+     answer      TEXT    NOT NULL DEFAULT '',
      source_file TEXT    NOT NULL DEFAULT '',
      fingerprint TEXT    NOT NULL UNIQUE,
      uuid        TEXT    NOT NULL UNIQUE,
@@ -261,8 +266,9 @@ export const SQL_SELECT_DECK_ID: string =
   `SELECT id FROM decks WHERE name = ? AND parent_id = ?`;
 
 export const SQL_INSERT_NOTE: string =
-  `INSERT INTO notes (deck_id, type, front, back, title, source_file, fingerprint, uuid, updated_at)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  `INSERT INTO notes (deck_id, type, front, back, title, options, answer,
+                      source_file, fingerprint, uuid, updated_at)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 export const SQL_INSERT_CARD: string =
   `INSERT INTO cards (note_id, ordinal, uuid, updated_at) VALUES (?, ?, ?, ?)`;
@@ -270,10 +276,63 @@ export const SQL_INSERT_CARD: string =
 export const SQL_COUNT_CARDS: string = `SELECT COUNT(*) AS n FROM cards`;
 
 export const SQL_SELECT_NOTE_BY_CARD: string =
-  `SELECT n.id, n.deck_id, n.type, n.front, n.back, n.title, n.source_file,
-          n.fingerprint, n.uuid, n.updated_at, c.ordinal
-     FROM cards c JOIN notes n ON n.id = c.note_id
+  `SELECT n.id AS note_id, n.type, n.front, n.back, n.title, n.options, n.answer,
+          n.fingerprint, c.ordinal, d.name AS deck_name
+     FROM cards c
+     JOIN notes n ON n.id = c.note_id
+     LEFT JOIN decks d ON d.id = n.deck_id
     WHERE c.id = ?`;
+
+/** 某卡组下的卡片总数,用于首页显示 */
+export const SQL_COUNT_CARDS_IN_DECK: string =
+  `SELECT COUNT(*) AS n FROM cards c
+     JOIN notes n ON n.id = c.note_id
+    WHERE n.deck_id = ?`;
+
+/** 按指纹找已有笔记(Task 7 幂等重导用) */
+export const SQL_SELECT_NOTE_BY_FINGERPRINT: string =
+  `SELECT id FROM notes WHERE fingerprint = ?`;
+
+/** 今日待学总量:到期卡数 + 新卡数,分两条查免得一条 SQL 里塞两种语义 */
+export const SQL_COUNT_DUE: string =
+  `SELECT COUNT(*) AS n FROM scheduling WHERE due <= ?`;
+
+export const SQL_COUNT_NEW: string =
+  `SELECT COUNT(*) AS n FROM cards c
+     LEFT JOIN scheduling s ON s.card_id = c.id
+    WHERE s.card_id IS NULL`;
+
+/**
+ * 复习界面需要的一整张卡(笔记内容 + 卡片序号)。
+ * 字段名与 SQL_SELECT_NOTE_BY_CARD 的列名一致,便于逐列核对。
+ */
+export interface ReviewCardRow {
+  note_id: number;
+  type: number;
+  front: string;
+  back: string;
+  title: string;
+  /** 选项原文,存的时候用 \n 连接 */
+  options: string;
+  answer: string;
+  fingerprint: string;
+  ordinal: number;
+  deck_name: string;
+}
+
+/** 选项在库里以换行连接,取出时拆回数组。空串拆出空数组,不要拆出 [''] */
+export function splitOptions(joined: string): string[] {
+  if (joined.length === 0) {
+    return [];
+  }
+  const out: string[] = [];
+  for (const one of joined.split('\n')) {
+    if (one.trim().length > 0) {
+      out.push(one);
+    }
+  }
+  return out;
+}
 
 /**
  * 生成 uuid。为将来同步预留,现阶段只要求「全局不重复」。

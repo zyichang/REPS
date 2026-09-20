@@ -34,10 +34,20 @@ export interface ParsedCard {
    * 这样用户把题干里的错别字改掉,卡片仍然是同一张,进度不丢。
    */
   key: string;
-  /** 正面原文,已去掉首尾空行,保留内部换行与 Markdown */
+  /**
+   * 正面。**选择题的 `;;;` 块已经被摘掉**,只剩题干。
+   *
+   * 这一点是安全性而不是美观:`;;;` 块的收尾行形如 `;;;D`,那个 D 就是答案。
+   * 原样留在正面等于提问的同时把答案印在题面上。所以答案必须**物理移出**正面,
+   * 不能只靠显示层去躲 —— 显示层以后总会有人改。
+   */
   front: string;
   /** 背面原文 */
   back: string;
+  /** 选择题的选项,每项一行的原文(如 `A. 程序`)。非选择题为空数组 */
+  options: string[];
+  /** 选择题的正确答案字母,如 `B` 或 `ABD`。非选择题为空串 */
+  answer: string;
   type: NoteType;
   /** 这张卡在文件里的序号,从 0 起,仅用于报错定位 */
   index: number;
@@ -53,6 +63,11 @@ export interface ParsedDeck {
   deckPath: string[];
   tags: string[];
   format: number;
+  /**
+   * 文件里原本有没有 front matter。false 表示卡组名是调用方兜底给的,
+   * 界面上值得提示一句,让用户知道卡组名的来历。
+   */
+  hadFrontMatter: boolean;
   cards: ParsedCard[];
 }
 
@@ -148,11 +163,16 @@ function extractTitle(front: string): string {
  * 从标题里取出**卡片标识键**。
  *
  * 规范给了两种标题形式,这里各自取其识别部分:
- *   `#### 1.2.3 求下列极限`        -> `1.2.3`     (点号编号)
- *   `#### 综合填空 (3) 已知 f(x)…`  -> `综合填空 (3)` (命名小节 + 题号)
+ *   `#### 1.2.3 求下列极限`            -> `1.2.3`            (点号编号)
+ *   `#### 综合填空 (3) 已知 f(x)…`      -> `综合填空 (3)`      (命名小节 + 题号)
+ *   `#### 基础篇 第12章 (2)-(1) 水缸…`  -> `基础篇 第12章 (2)-(1)` (带子题号)
  *
  * **为什么不用整行标题当身份:** 整行含题干文字,用户改一个错别字就会
  * 变成另一张卡,排期进度全丢。键只取编号部分,对正文编辑免疫。
+ *
+ * **为什么必须吃完整条编号链:** 真实语料里有 `(2)-(1)` / `(2)-(2)` 这种子题编号。
+ * 只吃第一个括号的话两者会塌成同一个键,被误判成重复卡 —— 用户 PKB 里
+ * 有 8 个文件因此解析失败,是真实数据发现的 bug。
  *
  * 两种都不匹配时退回整行(此时改标题确实会被当成新卡,这是没办法的事,
  * 但至少行为是明确的)。
@@ -166,17 +186,118 @@ export function cardKeyOf(title: string): string {
     return dotted[1];
   }
 
-  // 命名小节 + 括号题号。中英文括号都认,括号内允许空格
-  const named = t.match(/^(.*?)[(（]\s*(\d+)\s*[)）]/);
+  // 命名小节 + 一条或多条括号编号。中英文括号都认,括号内允许空格,
+  // 编号之间允许 - 或 . 或空格连接。
+  const named = t.match(/^(.*?)((?:[(（]\s*\d+\s*[)）])(?:\s*[-.]?\s*[(（]\s*\d+\s*[)）])*)/);
   if (named !== null) {
     const name = named[1].trim();
-    if (name.length > 0) {
-      return `${name} (${named[2]})`;
+    // 把编号链规范化:全角括号转半角、去掉内部空格,连接符统一成 -
+    const nums: string[] = [];
+    const re = /[(（]\s*(\d+)\s*[)）]/g;
+    let m = re.exec(named[2]);
+    while (m !== null) {
+      nums.push(`(${m[1]})`);
+      m = re.exec(named[2]);
     }
-    return `(${named[2]})`;
+    const chain = nums.join('-');
+    return name.length > 0 ? `${name} ${chain}` : chain;
   }
 
   return t;
+}
+
+/** 摘出来的选择题块 */
+export interface ChoiceBlock {
+  /** 摘掉 ;;; 块之后剩下的题干 */
+  stem: string;
+  /** 选项原文,每项一行 */
+  options: string[];
+  /** 正确答案字母,单选一个字母,多选多个,如 ABD */
+  answer: string;
+  found: boolean;
+}
+
+const MARK_CHOICE: string = ';;;';
+
+/**
+ * 去掉行尾的空白与 Markdown 硬换行反斜杠。
+ *
+ * 真实语料里有人把开启标记写成 `;;;\`(顺手给每行都加了硬换行),
+ * 只按空白去尾的话这一行就认不出来,整个 `;;;` 块连答案一起留在正面。
+ * 用户 PKB 的 3_1.md 就是这样,1850 张卡里泄露了 1 张。
+ */
+function trimTailAndBreak(line: string): string {
+  return line.replace(/\s+$/, '').replace(/\\+$/, '').replace(/\s+$/, '');
+}
+
+/**
+ * 从正面里摘出 `;;;` 选择题块。
+ *
+ * 规范形状:
+ * ```
+ * ;;;
+ * A. 程序
+ * B. 问题求解步骤的描述
+ * ;;;B          <- 收尾行紧跟答案字母,多选则多个字母
+ * ```
+ *
+ * **为什么一定要摘出来而不是留在正面:** 收尾行 `;;;B` 里的 B 就是答案。
+ * 留在正面等于把答案印在题面上。这在用户 PKB 的 60 个文件里都会发生。
+ *
+ * 围栏代码块内部的 `;;;` 不算 —— 同 +++/*** 的道理。
+ */
+export function extractChoiceBlock(front: string): ChoiceBlock {
+  const lines = front.split('\n');
+  let inFence = false;
+  let start = -1;
+  let end = -1;
+  let answer = '';
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    if (isFence(raw)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) {
+      continue;
+    }
+    const t = trimTailAndBreak(raw);
+    if (!t.startsWith(MARK_CHOICE)) {
+      continue;
+    }
+    // 开启行是光秃秃的 ;;;(可能带硬换行反斜杠,已在上面剥掉)
+    if (start < 0 && t === MARK_CHOICE) {
+      start = i;
+      continue;
+    }
+    // 收尾行是 ;;; 紧跟答案字母(也允许光秃秃的 ;;;,此时答案未知)
+    if (start >= 0 && end < 0) {
+      end = i;
+      answer = t.substring(MARK_CHOICE.length).trim().toUpperCase();
+      break;
+    }
+  }
+
+  if (start < 0 || end < 0) {
+    return { stem: front, options: [], answer: '', found: false };
+  }
+
+  const options: string[] = [];
+  for (let i = start + 1; i < end; i++) {
+    // 选项行的硬换行反斜杠对显示没有意义(每个选项本来就独占一行),剥掉
+    const one = trimTailAndBreak(lines[i]).trim();
+    if (one.length > 0) {
+      options.push(one);
+    }
+  }
+
+  // 题干 = ;;; 块之前 + 之后的内容(之后通常是空的,但别丢)
+  const before = lines.slice(0, start);
+  const after = lines.slice(end + 1);
+  const stem = trimBlankEdges(before.concat(after));
+
+  return { stem: stem, options: options, answer: answer, found: true };
 }
 
 /** 去掉首尾空行,但保留内部换行(正文的排版是有意义的) */
@@ -200,6 +321,8 @@ interface FrontMatter {
   format: number;
   /** front matter 之后的第一行下标(0 基) */
   bodyStart: number;
+  /** 文件里原本有没有 front matter。false 表示用的是兜底卡组名 */
+  hadFrontMatter: boolean;
 }
 
 /** front matter 的三个可变字段。单独一个接口,是为了能把 applyField 提到顶层 */
@@ -233,12 +356,16 @@ function applyField(f: FmFields, key: string, value: string): void {
  * 这里只认 quizify 这一层下面的简单标量与列表,不做通用 YAML 解析
  * (通用 YAML 会引入依赖,而且我们只需要三个字段)。
  */
-function parseFrontMatter(lines: string[]): FrontMatter {
+function parseFrontMatter(lines: string[], fallbackDeck?: string): FrontMatter {
   let i = 0;
   while (i < lines.length && lines[i].trim().length === 0) {
     i++;
   }
   if (i >= lines.length || lines[i].trim() !== '---') {
+    // 没有 front matter。调用方给了兜底卡组名就照用,否则报错。
+    if (fallbackDeck !== undefined && fallbackDeck.length > 0) {
+      return { deck: fallbackDeck, tags: [], format: 1, bodyStart: i, hadFrontMatter: false };
+    }
     throw new QuizifyError('缺少 YAML front matter。文件开头必须有 --- 包起来的 quizify 声明', i + 1);
   }
 
@@ -299,7 +426,7 @@ function parseFrontMatter(lines: string[]): FrontMatter {
     throw new QuizifyError(`不支持的 format: ${f.format}(本解析器只认 format: 1)`, start + 1);
   }
 
-  return { deck: f.deck, tags: f.tags, format: f.format, bodyStart: end + 1 };
+  return { deck: f.deck, tags: f.tags, format: f.format, bodyStart: end + 1, hadFrontMatter: true };
 }
 
 function stripQuotes(s: string): string {
@@ -362,14 +489,22 @@ function parseList(value: string): string[] {
 /**
  * 解析一份 Quizify Markdown。
  *
+ * fallbackDeck:当文件没有 front matter 时用作卡组名(通常由调用方取文件名)。
+ * 不传则缺 front matter 直接报错。
+ *
+ * 为什么留这个口子:规范把 front matter 定为必需,理由是「没有显式 deck,
+ * 导入就没有可靠的落点」—— 那是针对 Anki 导入界面说的。REPS 导入的是用户
+ * **亲手选中的那个文件**,文件路径本身就是可靠落点。用户 PKB 里有 25 个文件
+ * (548 张真卡)是直接从 +++ 开头的,一律拒收没有道理。
+ *
  * 失败时抛 QuizifyError 而不是返回半成品 —— 静默产出错卡比报错糟得多。
  */
-export function parseQuizify(text: string): ParsedDeck {
+export function parseQuizify(text: string, fallbackDeck?: string): ParsedDeck {
   // 统一换行,顺手去掉 BOM
   const clean = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const lines = clean.split('\n');
 
-  const fm = parseFrontMatter(lines);
+  const fm = parseFrontMatter(lines, fallbackDeck);
 
   const cards: ParsedCard[] = [];
   let region: Region = Region.Preamble;
@@ -396,12 +531,15 @@ export function parseQuizify(text: string): ParsedDeck {
         `这张卡有 ${sideMarks} 条 *** 分隔线,每张卡只能有一条`, cardStartLine);
     }
     const title = extractTitle(front);
+    const choice: ChoiceBlock = extractChoiceBlock(front);
     cards.push({
       title: title,
       key: cardKeyOf(title),
-      front: front,
+      front: choice.found ? choice.stem : front,
       back: trimBlankEdges(backLines),
-      type: NoteType.QA,
+      options: choice.options,
+      answer: choice.answer,
+      type: choice.found ? NoteType.Choice : NoteType.QA,
       index: cards.length,
       line: cardStartLine,
     });
@@ -479,6 +617,7 @@ export function parseQuizify(text: string): ParsedDeck {
     deckPath: fm.deck.split('::').map((s) => s.trim()).filter((s) => s.length > 0),
     tags: fm.tags,
     format: fm.format,
+    hadFrontMatter: fm.hadFrontMatter,
     cards: cards,
   };
 }

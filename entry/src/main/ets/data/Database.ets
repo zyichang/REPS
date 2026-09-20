@@ -16,10 +16,11 @@ import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { CardState, NoteType, ReviewLog } from '../model/Models';
 import {
-  DDL, SQL_COUNT_CARDS, SQL_DUE_CARDS, SQL_INSERT_CARD, SQL_INSERT_DECK,
-  SQL_INSERT_LOG, SQL_INSERT_NOTE, SQL_NEW_CARDS, SQL_SELECT_DECK_ID,
-  SQL_SELECT_SCHEDULING, SQL_UPSERT_SCHEDULING, SchedulingRow, fingerprintOf,
-  fromSchedulingRow, isValidAlgo, makeUuid, schedulingValues, toSchedulingRow,
+  DDL, ReviewCardRow, SQL_COUNT_CARDS, SQL_COUNT_DUE, SQL_COUNT_NEW, SQL_DUE_CARDS,
+  SQL_INSERT_CARD, SQL_INSERT_DECK, SQL_INSERT_LOG, SQL_INSERT_NOTE, SQL_NEW_CARDS,
+  SQL_SELECT_DECK_ID, SQL_SELECT_NOTE_BY_CARD, SQL_SELECT_SCHEDULING,
+  SQL_UPSERT_SCHEDULING, SchedulingRow, fingerprintOf, fromSchedulingRow,
+  isValidAlgo, makeUuid, schedulingValues, toSchedulingRow,
 } from './Schema';
 
 const DOMAIN: number = 0x0A01;
@@ -145,10 +146,10 @@ export class Database {
    * cardCount 由题型决定:问答与选择题恒为 1,完形填空等于挖空个数。
    */
   insertNote(deckId: number, deckName: string, type: NoteType, front: string, back: string,
-             title: string, key: string, sourceFile: string, cardCount: number,
-             now: number): number[] {
+             title: string, key: string, options: string[], answer: string,
+             sourceFile: string, cardCount: number, now: number): number[] {
     const noteId: number = this.insertNoteRow(deckId, deckName, type, front, back,
-      title, key, sourceFile, 0, now);
+      title, key, options, answer, sourceFile, 0, now);
     const ids: number[] = [];
     for (let i = 0; i < cardCount; i++) {
       this.db().executeSync(SQL_INSERT_CARD,
@@ -159,14 +160,59 @@ export class Database {
   }
 
   private insertNoteRow(deckId: number, deckName: string, type: NoteType, front: string,
-                        back: string, title: string, key: string, sourceFile: string,
-                        ordinal: number, now: number): number {
+                        back: string, title: string, key: string, options: string[],
+                        answer: string, sourceFile: string, ordinal: number,
+                        now: number): number {
     const fp: string = fingerprintOf(deckName, key, ordinal);
     this.db().executeSync(SQL_INSERT_NOTE, [
-      deckId, type as number, front, back, title, sourceFile,
-      fp, makeUuid('n', now), now,
+      deckId, type as number, front, back, title, options.join('\n'), answer,
+      sourceFile, fp, makeUuid('n', now), now,
     ] as Array<relationalStore.ValueType>);
     return this.lastInsertId('notes');
+  }
+
+  /** 取一张卡的完整内容,供复习界面显示。找不到返回 null */
+  loadReviewCard(cardId: number): ReviewCardRow | null {
+    const rs = this.db().querySqlSync(SQL_SELECT_NOTE_BY_CARD, [cardId]);
+    try {
+      if (!rs.goToFirstRow()) {
+        return null;
+      }
+      return {
+        note_id: rs.getLong(rs.getColumnIndex('note_id')),
+        type: rs.getLong(rs.getColumnIndex('type')),
+        front: rs.getString(rs.getColumnIndex('front')),
+        back: rs.getString(rs.getColumnIndex('back')),
+        title: rs.getString(rs.getColumnIndex('title')),
+        options: rs.getString(rs.getColumnIndex('options')),
+        answer: rs.getString(rs.getColumnIndex('answer')),
+        fingerprint: rs.getString(rs.getColumnIndex('fingerprint')),
+        ordinal: rs.getLong(rs.getColumnIndex('ordinal')),
+        deck_name: rs.getString(rs.getColumnIndex('deck_name')),
+      };
+    } finally {
+      rs.close();
+    }
+  }
+
+  /** 到期卡总数(不受取卡上限影响,用于首页显示「今天还有多少」) */
+  dueCount(now: number): number {
+    return this.scalar(SQL_COUNT_DUE, [now]);
+  }
+
+  /** 新卡总数 */
+  newCount(): number {
+    return this.scalar(SQL_COUNT_NEW, []);
+  }
+
+  private scalar(sql: string, args: Array<relationalStore.ValueType>): number {
+    const rs = this.db().querySqlSync(sql, args);
+    try {
+      rs.goToFirstRow();
+      return rs.getLong(rs.getColumnIndex('n'));
+    } finally {
+      rs.close();
+    }
   }
 
   private lastInsertId(table: string): number {

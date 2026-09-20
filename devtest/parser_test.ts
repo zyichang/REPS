@@ -7,6 +7,7 @@
  */
 
 import { NoteType } from './Models';
+import { splitOptions } from './Schema';
 import { ParsedDeck, QuizifyError, cardKeyOf, parseQuizify } from './Quizify';
 
 let pass = 0;
@@ -282,6 +283,147 @@ B
 check('ParsedCard 带 key 字段', keyed.cards[0].key === '基础选择 (5)', keyed.cards[0].key);
 check('title 仍保留完整原文',
   keyed.cards[0].title === '基础选择 (5) 下列说法正确的是()。', keyed.cards[0].title);
+
+// ================================================================ 8. 真实语料回归
+console.log('\n=== 8. 真实语料(PKB 1850 张卡)暴露出的情况 ===');
+
+// 子题编号:这是真实数据发现的 bug。非贪婪正则只吃第一个括号,
+// 会让 (2)-(1) 与 (2)-(2) 塌成同一个键,8 个文件因此被误判为重复卡。
+check('子题编号 (2)-(1) 完整保留',
+  cardKeyOf('基础篇 第12章 (2)-(1) 有一内表面为旋转抛物面的水缸') === '基础篇 第12章 (2)-(1)',
+  cardKeyOf('基础篇 第12章 (2)-(1) 有一内表面为旋转抛物面的水缸'));
+check('(2)-(1) 与 (2)-(2) 是两个不同的键',
+  cardKeyOf('基础篇 第12章 (2)-(1) 甲') !== cardKeyOf('基础篇 第12章 (2)-(2) 乙'),
+  `${cardKeyOf('基础篇 第12章 (2)-(1) 甲')} vs ${cardKeyOf('基础篇 第12章 (2)-(2) 乙')}`);
+check('(2) 与 (2)-(1) 也不相同',
+  cardKeyOf('X (2) 甲') !== cardKeyOf('X (2)-(1) 甲'),
+  `${cardKeyOf('X (2) 甲')} vs ${cardKeyOf('X (2)-(1) 甲')}`);
+check('三层编号也吃得下',
+  cardKeyOf('综合 (1)-(2)-(3) 题干') === '综合 (1)-(2)-(3)',
+  cardKeyOf('综合 (1)-(2)-(3) 题干'));
+// 标题里「第12章」含数字但不含点,不该被点号分支误命中
+check('标题中的「第12章」不被当作点号编号',
+  cardKeyOf('基础篇 第12章 (1) 题干') === '基础篇 第12章 (1)',
+  cardKeyOf('基础篇 第12章 (1) 题干'));
+// 全角括号 + 无数字的（ ）不该命中编号分支
+check('（ ）这种填空括号不算编号',
+  cardKeyOf('01. 图中有关路径的定义是（ ）。') === '01. 图中有关路径的定义是（ ）。');
+
+// 没有 front matter:用户 PKB 里有 25 个文件(548 张卡)直接从 +++ 开头
+const noFm: ParsedDeck = parseQuizify(
+  `+++\n\n01. 图中有关路径的定义是( )。\n***\nA\n`, '王道数据结构_6_1');
+check('缺 front matter 时可用兜底卡组名', noFm.deck === '王道数据结构_6_1', noFm.deck);
+check('并标记出卡组名是兜底来的', noFm.hadFrontMatter === false);
+check('有 front matter 时该标记为 true', basic.hadFrontMatter === true);
+expectError('缺 front matter 且没给兜底名时仍报错',
+  `+++\n正面\n***\n背面\n`, 'front matter');
+
+// ================================================================ 9. 选择题块
+console.log('\n=== 9. ;;; 选择题块:答案必须离开正面 ===');
+
+const mcq: ParsedDeck = parseQuizify(`${FM}
++++
+
+#### 基础选择 (1) 一个算法应该是( )。
+
+;;;
+A. 程序
+B. 问题求解步骤的描述
+C. 要满足五个基本特性
+D. A 和 C
+;;;B
+***
+算法是**问题求解步骤的描述**,程序是算法在计算机上的特定实现。
+`);
+
+const c0 = mcq.cards[0];
+check('识别为选择题', c0.type === NoteType.Choice, `type=${c0.type}`);
+check('四个选项都摘出来了', c0.options.length === 4, `${c0.options.length} 个`);
+check('选项原文保留', c0.options[1] === 'B. 问题求解步骤的描述', c0.options[1]);
+check('答案字母取到了', c0.answer === 'B', c0.answer);
+
+// 这是整段代码存在的理由
+check('**正面已不含答案字母**', !c0.front.includes(';;;B'), JSON.stringify(c0.front));
+check('**正面已不含 ;;; 标记**', !c0.front.includes(';;;'), JSON.stringify(c0.front));
+check('正面也不含选项文本(选项单独存)', !c0.front.includes('A. 程序'));
+check('正面只剩题干', c0.front === '#### 基础选择 (1) 一个算法应该是( )。', JSON.stringify(c0.front));
+check('背面不受影响', c0.back.startsWith('算法是'), c0.back.slice(0, 8));
+
+// 多选
+const multi: ParsedDeck = parseQuizify(`${FM}
++++
+
+#### 基础选择 (2) 下列正确的是( )。
+
+;;;
+A. 甲
+B. 乙
+C. 丙
+D. 丁
+;;;ABD
+***
+甲乙丁。
+`);
+check('多选答案 ABD', multi.cards[0].answer === 'ABD', multi.cards[0].answer);
+
+// 小写答案要归一化成大写
+const lower: ParsedDeck = parseQuizify(`${FM}\n+++\n\n#### 小写 (1) 题干\n\n;;;\nA. 甲\nB. 乙\n;;;b\n***\n乙\n`);
+check('小写答案归一化为大写', lower.cards[0].answer === 'B', lower.cards[0].answer);
+
+// 非选择题不该被误判
+check('纯问答仍是 QA 且无选项',
+  basic.cards[0].type === NoteType.QA && basic.cards[0].options.length === 0);
+check('纯问答的 answer 为空', basic.cards[0].answer === '');
+
+// 围栏代码块里的 ;;; 不能当选择题块
+const fencedSemi: ParsedDeck = parseQuizify(`${FM}
++++
+
+#### 代码里有分号 (1) 这段 C 代码?
+
+\`\`\`c
+for (;;) { }
+;;;
+\`\`\`
+***
+死循环。
+`);
+check('代码块内的 ;;; 不被当作选择题块',
+  fencedSemi.cards[0].type === NoteType.QA && fencedSemi.cards[0].options.length === 0,
+  `type=${fencedSemi.cards[0].type} options=${fencedSemi.cards[0].options.length}`);
+check('代码块内容完整保留', fencedSemi.cards[0].front.includes('for (;;)'));
+
+// 真实语料的形状:选项之间没有空格、题干不带 ####
+const realShape: ParsedDeck = parseQuizify(
+  `+++\n\n1. 可以用( )定义一个完整的数据结构。\n\n;;;\nA.数据元素\nB.数据对象\nC.数据关系\nD.抽象数据类型\n;;;D\n***\n1. 抽象数据类型\n`,
+  '王道_1_1');
+check('真实语料形状也能解析', realShape.cards[0].options.length === 4);
+check('真实语料的答案是 D', realShape.cards[0].answer === 'D');
+check('真实语料的正面不泄露答案', !realShape.cards[0].front.includes('D'),
+  JSON.stringify(realShape.cards[0].front));
+
+// splitOptions 的往返(界面靠它把库里的字符串拆回数组)
+check('选项 join/split 往返一致',
+  splitOptions(c0.options.join('\n')).join('|') === c0.options.join('|'));
+check('空串拆出空数组,而不是含一个空串的数组', splitOptions('').length === 0);
+
+// 真实语料里有人给 ;;; 那一行也加了硬换行反斜杠。只按空白去尾会认不出来,
+// 整块连答案一起留在正面 —— 1850 张卡里就泄露了这一张(3_1.md)。
+const backslashed: ParsedDeck = parseQuizify(
+  `+++\n\n01. 栈和队列具有相同的( )。\n\n;;;\\\nA. 抽象数据类型\\\nB. 逻辑结构\\\nC. 存储结构\\\nD. 运算\\\n;;;B\n***\n逻辑结构。\n`,
+  '王道_3_1');
+check('开启标记写成 `;;;\\` 也能识别',
+  backslashed.cards[0].options.length === 4, `${backslashed.cards[0].options.length} 个选项`);
+check('这种写法的答案也取到了', backslashed.cards[0].answer === 'B', backslashed.cards[0].answer);
+check('这种写法的正面同样不泄露答案',
+  !backslashed.cards[0].front.includes(';;;'), JSON.stringify(backslashed.cards[0].front));
+check('选项末尾的硬换行反斜杠被剥掉(显示时是噪声)',
+  backslashed.cards[0].options[0] === 'A. 抽象数据类型', backslashed.cards[0].options[0]);
+
+// 收尾行带反斜杠也要认
+const tailBreak: ParsedDeck = parseQuizify(
+  `+++\n\n题干\n\n;;;\nA. 甲\nB. 乙\n;;;A\\\n***\n甲\n`, 'x');
+check('收尾行 `;;;A\\` 也能取到答案', tailBreak.cards[0].answer === 'A', tailBreak.cards[0].answer);
 
 console.log(`\n===== 结果: ${pass} 通过 / ${fail} 失败 =====`);
 process.exit(fail === 0 ? 0 : 1);

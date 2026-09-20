@@ -1,181 +1,338 @@
 /**
- * 首页。
- *
- * Task 3 阶段的作用:证明「排期状态能落库、能读回、due 会推进」这条链路在设备上成立。
- * 真正的复习界面在 Task 5 接进来,届时这一页会被替换。
+ * 主页面:导入 → 复习 → 评级。
  *
  * 本项目的 ArkUI 铁律(WordSnap 踩过四次):
- * UI 只能依赖 @State / @StorageLink,绝不能依赖普通对象字段——
- * 按值传参的 @Builder 不会响应更新。所以下面每一行要显示的文字都是 @State。
+ * **UI 只能依赖 @State / @StorageLink,绝不能依赖普通对象字段。**
+ * 按值传参的 @Builder 不会响应更新,而编译器完全不报错。
+ * 所以下面每一处要显示的内容都摊平成 @State,@Builder 只接常量下标。
+ *
+ * 评级按钮用 FSRS 原生的四档(忘了/困难/良好/简单)。
+ * WordSnap 当年收成三档,但那是背单词的取舍;REPS 主打排期透明,
+ * 四档直通引擎,不做折叠。
  */
 
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Database } from '../data/Database';
-import { ParsedDeck, parseQuizify } from '../data/Quizify';
-import { CardState, Grade, PHASE_LABEL } from '../model/Models';
+import { ImportResult, importFromPicker } from '../data/Importer';
+import { ReviewCardRow, splitOptions } from '../data/Schema';
+import { CardState, GRADE_COLOR, GRADE_LABEL, Grade, NoteType, PHASE_LABEL } from '../model/Models';
 import { formatInterval, newCardState, schedule } from '../srs/Srs';
 
 const DOMAIN: number = 0x0A01;
 const TAG: string = 'REPS-Index';
 
-/**
- * 内置的一份 Quizify 样例,用来在设备上验证解析器。
- * Task 5 会换成从用户文件读取。
- */
-const SAMPLE: string = `---
-quizify:
-  format: 1
-  deck: REPS::自检
-  tags: [REPS, 自检]
----
-
-+++
-
-#### 自检 (1) 刻意重复的英文名是什么?
-***
-REPS —— 一天的量是 a set,一次作答是 a rep。
-
-+++
-
-#### 自检 (2) FSRS 里的 S 指什么?
-***
-稳定性(stability),单位是天。数值越大,记得越牢。
-
-+++
-
-#### 自检 (3) 一天的分界在几点?
-***
-凌晨 1 点。深夜还在学的人,刚过 0 点不该看到明天的卡。
-`;
+/** 页面所处的阶段 */
+enum Stage {
+  Loading = 0,
+  Landing = 1,
+  Card = 2,
+  Done = 3
+}
 
 @Entry
 @Component
 struct Index {
-  @State private tagline: string = '把一本书变成一整副卡组';
-  @State private dbStatus: string = '正在打开数据库…';
-  @State private parseLine: string = '';
-  @State private cardLine: string = '';
-  @State private stateLine: string = '';
-  @State private dueLine: string = '';
-  @State private ok: boolean = false;
+  // ---- 全局状态 ----
+  @State private stage: Stage = Stage.Loading;
+  @State private status: string = '正在打开数据库…';
+  @State private totalCards: number = 0;
+  @State private dueCards: number = 0;
+  @State private newCards: number = 0;
+
+  // ---- 当前卡片(摊平成 @State,不存对象) ----
+  @State private cardId: number = 0;
+  @State private cardDeck: string = '';
+  @State private cardStem: string = '';
+  @State private cardOptions: string[] = [];
+  @State private cardBack: string = '';
+  @State private cardAnswer: string = '';
+  @State private cardType: number = 0;
+  @State private revealed: boolean = false;
+
+  // ---- 上一次作答的反馈 ----
+  @State private lastLine: string = '';
+  @State private busy: boolean = false;
 
   private db: Database = new Database();
+  /** 本次会话的取卡队列。不是 @State:它不直接决定任何显示内容 */
+  private queue: number[] = [];
+  private answeredThisSession: number = 0;
 
   aboutToAppear(): void {
-    this.runSelfCheck();
+    this.boot();
   }
 
-  /**
-   * 设备侧自检:建库 → 造一张卡 → 评一次级 → 落盘 → 读回 → 看 due 是否推进。
-   * 逻辑本身已由 devtest/schema_test.ts 的 47 条断言覆盖,
-   * 这里验的是 relationalStore 这一层真的能跑。
-   */
-  private async runSelfCheck(): Promise<void> {
+  private async boot(): Promise<void> {
     try {
       const ctx = getContext(this) as common.UIAbilityContext;
       await this.db.init(ctx);
-      this.dbStatus = '数据库已就绪';
+      this.refreshCounts();
+      this.status = this.totalCards === 0 ? '还没有卡片,先导入一个文件' : '';
+      this.stage = Stage.Landing;
+    } catch (e) {
+      this.status = `数据库打开失败: ${e}`;
+      hilog.error(DOMAIN, TAG, '启动失败 %{public}s', String(e));
+    }
+  }
 
-      const now: number = Date.now();
+  /** 计数一律从数据库重算 —— 内存里另记一份,两边生命周期不一致时减法一定出错 */
+  private refreshCounts(): void {
+    const now: number = Date.now();
+    this.totalCards = this.db.cardCount();
+    this.dueCards = this.db.dueCount(now);
+    this.newCards = this.db.newCount();
+  }
 
-      // 解析内置样例,证明解析器在设备上也能跑
-      const parsed: ParsedDeck = parseQuizify(SAMPLE);
-      this.parseLine = `解析出 ${parsed.cards.length} 张卡,卡组 ${parsed.deckPath.join(' > ')}`;
+  // ------------------------------------------------------------ 导入
 
-      // 库里还没有卡就把样例导进去
-      if (this.db.cardCount() === 0) {
-        let parentId: number = 0;
-        for (const level of parsed.deckPath) {
-          parentId = this.db.ensureDeck(level, parentId);
-        }
-        for (const c of parsed.cards) {
-          this.db.insertNote(parentId, parsed.deck, c.type, c.front, c.back,
-            c.title, c.key, 'sample', 1, now);
-        }
+  private async onImport(): Promise<void> {
+    if (this.busy) {
+      return;
+    }
+    this.busy = true;
+    this.status = '正在导入…';
+    try {
+      const ctx = getContext(this) as common.UIAbilityContext;
+      const r: ImportResult = await importFromPicker(ctx, this.db);
+      if (r.ok) {
+        this.refreshCounts();
+        const fallback = r.usedFallbackDeck ? '(文件没有 front matter,卡组名取自文件名)' : '';
+        this.status = `已导入 ${r.cardsAdded} 张卡到「${r.deck}」${fallback}`;
+      } else {
+        this.status = r.error === '已取消' ? '' : `导入失败:${r.error}`;
       }
+    } catch (e) {
+      this.status = `导入出错: ${e}`;
+    } finally {
+      this.busy = false;
+    }
+  }
 
-      // 优先取到期卡,没有就取新卡
-      const dues: number[] = this.db.dueCardIds(now, 1);
-      const news: number[] = this.db.newCardIds(1);
-      const cardId: number = dues.length > 0 ? dues[0] : (news.length > 0 ? news[0] : 1);
-      this.cardLine = `共 ${this.db.cardCount()} 张卡,待复习 ${dues.length}、新卡 ${news.length},本次用 #${cardId}`;
+  // ------------------------------------------------------------ 会话
 
-      // 读不到状态说明是新卡
-      const prev: CardState | null = this.db.loadState(cardId);
-      const base: CardState = prev !== null ? prev : newCardState(cardId, now);
+  /**
+   * 开始学习。**今日集合在这里一次定好**,之后不再追加 ——
+   * 这样永远不会出现「手上没卡但今天没做完」那种要靠倒计时兜的状态。
+   * 完整的上限与新卡额度规则在 Task 8。
+   */
+  private startSession(): void {
+    const now: number = Date.now();
+    const due: number[] = this.db.dueCardIds(now, 2000);
+    const fresh: number[] = this.db.newCardIds(20);
+    this.queue = due.concat(fresh);
+    this.answeredThisSession = 0;
+    this.lastLine = '';
+    if (this.queue.length === 0) {
+      this.stage = Stage.Done;
+      return;
+    }
+    this.nextCard();
+  }
 
-      const before: number = base.due;
-      const r = schedule(base, Grade.Good, now, true);
+  private nextCard(): void {
+    this.revealed = false;
+    if (this.queue.length === 0) {
+      this.refreshCounts();
+      this.stage = Stage.Done;
+      return;
+    }
+    const id: number = this.queue.shift() as number;
+    const row: ReviewCardRow | null = this.db.loadReviewCard(id);
+    if (row === null) {
+      // 卡片被删了之类,跳过
+      this.nextCard();
+      return;
+    }
+    this.cardId = id;
+    this.cardDeck = row.deck_name;
+    this.cardStem = row.front;
+    this.cardOptions = splitOptions(row.options);
+    this.cardBack = row.back;
+    this.cardAnswer = row.answer;
+    this.cardType = row.type;
+    this.stage = Stage.Card;
+  }
+
+  private rate(grade: Grade): void {
+    if (this.busy) {
+      return;
+    }
+    this.busy = true;
+    try {
+      const now: number = Date.now();
+      const prev: CardState | null = this.db.loadState(this.cardId);
+      const base: CardState = prev !== null ? prev : newCardState(this.cardId, now);
+      const r = schedule(base, grade, now, true);
+
       this.db.saveState(r.state);
       this.db.logReview({
-        id: 0, cardId: cardId, ts: now, grade: Grade.Good as number,
+        id: 0, cardId: this.cardId, ts: now, grade: grade as number,
         stabilityBefore: r.stabilityBefore, elapsedDays: r.elapsedDays,
         retrievability: r.retrievability, intervalDays: r.intervalDays,
         costMs: 0, algo: 'fsrs',
       });
 
-      // 关键一步:从数据库读回,而不是用内存里那份
-      const reloaded: CardState | null = this.db.loadState(cardId);
-      if (reloaded === null) {
-        this.stateLine = '读回失败:数据库里没有这张卡的状态';
-        return;
+      this.answeredThisSession++;
+      this.lastLine = `${GRADE_LABEL[grade as number]} · ${PHASE_LABEL[r.state.phase]}` +
+        ` · 下次 ${formatInterval(r.intervalDays)}后`;
+
+      // 还在分钟级步进的卡,今天还会再来一次
+      if (r.intervalDays < 1) {
+        this.queue.push(this.cardId);
       }
-
-      this.stateLine = `${PHASE_LABEL[reloaded.phase]} · S=${reloaded.stability.toFixed(2)} 天` +
-        ` · D=${reloaded.difficulty.toFixed(2)} · 第 ${reloaded.reps} 次`;
-      this.dueLine = `下次 ${formatInterval(r.intervalDays)}后 ` +
-        `(${this.hhmm(reloaded.due)})`;
-      this.ok = reloaded.due > before && reloaded.reps > 0;
-
-      hilog.info(DOMAIN, TAG, '自检完成, due %{public}d -> %{public}d', before, reloaded.due);
+      this.nextCard();
     } catch (e) {
-      this.dbStatus = `自检失败: ${e}`;
-      hilog.error(DOMAIN, TAG, '自检失败 %{public}s', String(e));
+      this.status = `保存失败: ${e}`;
+      hilog.error(DOMAIN, TAG, '评级失败 %{public}s', String(e));
+    } finally {
+      this.busy = false;
     }
   }
 
-  private hhmm(ms: number): string {
-    const d = new Date(ms);
-    const p = (n: number): string => n < 10 ? `0${n}` : `${n}`;
-    return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  // ------------------------------------------------------------ 界面
+
+  /**
+   * 评级按钮。**参数只接常量下标**,文字与颜色都在内部从常量表取 ——
+   * 这正是 WordSnap 踩了四次之后定下的写法。
+   */
+  @Builder
+  gradeButton(grade: number) {
+    Button(GRADE_LABEL[grade])
+      .fontSize(15)
+      .fontColor(Color.White)
+      .backgroundColor(GRADE_COLOR[grade])
+      .layoutWeight(1)
+      .height(46)
+      .onClick(() => this.rate(grade as Grade))
+  }
+
+  @Builder
+  landing() {
+    Column({ space: 14 }) {
+      Text('刻意重复').fontSize(32).fontWeight(FontWeight.Bold)
+      Text('REPS').fontSize(13).fontColor('#8A8A8E').letterSpacing(3)
+
+      Column({ space: 6 }) {
+        Text(`${this.totalCards}`).fontSize(40).fontWeight(FontWeight.Bold)
+        Text('张卡片').fontSize(13).fontColor('#8A8A8E')
+        Row({ space: 18 }) {
+          Text(`待复习 ${this.dueCards}`).fontSize(14).fontColor('#E5544B')
+          Text(`新卡 ${this.newCards}`).fontSize(14).fontColor('#4A90D9')
+        }.margin({ top: 4 })
+      }
+      .width('86%').padding(20).borderRadius(16).backgroundColor('#F5F5F7')
+
+      if (this.status.length > 0) {
+        Text(this.status).fontSize(13).fontColor('#48484A')
+          .width('86%').textAlign(TextAlign.Center)
+      }
+
+      Button('开始学习')
+        .width('86%').height(48).fontSize(16)
+        .enabled(this.dueCards + this.newCards > 0)
+        .onClick(() => this.startSession())
+
+      Button('导入 Markdown 文件')
+        .width('86%').height(44).fontSize(15)
+        .backgroundColor('#E5E5EA').fontColor('#1C1C1E')
+        .enabled(!this.busy)
+        .onClick(() => this.onImport())
+    }
+    .width('100%').height('100%').justifyContent(FlexAlign.Center)
+  }
+
+  @Builder
+  cardView() {
+    Column() {
+      // 顶部:卡组与进度
+      Row() {
+        Text(this.cardDeck).fontSize(12).fontColor('#8A8A8E').layoutWeight(1)
+        Text(`剩 ${this.queue.length + 1}`).fontSize(12).fontColor('#8A8A8E')
+      }
+      .width('90%').margin({ top: 8, bottom: 6 })
+
+      if (this.lastLine.length > 0) {
+        Text(this.lastLine).fontSize(11).fontColor('#8A8A8E')
+          .width('90%').margin({ bottom: 6 })
+      }
+
+      Scroll() {
+        Column({ space: 12 }) {
+          // 题干
+          Text(this.cardStem).fontSize(17).lineHeight(26).width('100%')
+
+          // 选项(选择题才有)。答案字母不在这里,它在 cardAnswer 里,
+          // 只有 revealed 之后才显示 —— 数据层已经把它从 front 里摘走了。
+          if (this.cardOptions.length > 0) {
+            Column({ space: 8 }) {
+              ForEach(this.cardOptions, (opt: string) => {
+                Text(opt).fontSize(15).lineHeight(23).width('100%')
+                  .padding({ left: 12, right: 12, top: 9, bottom: 9 })
+                  .borderRadius(8).backgroundColor('#F5F5F7')
+              })
+            }.width('100%')
+          }
+
+          if (this.revealed) {
+            Divider().margin({ top: 6, bottom: 6 })
+            if (this.cardAnswer.length > 0) {
+              Text(`答案 ${this.cardAnswer}`).fontSize(17)
+                .fontWeight(FontWeight.Bold).fontColor('#2E9E63').width('100%')
+            }
+            Text(this.cardBack).fontSize(15).lineHeight(24).fontColor('#48484A').width('100%')
+          }
+        }
+        .width('100%').padding({ left: 4, right: 4 })
+      }
+      .layoutWeight(1).width('90%').align(Alignment.Top)
+
+      // 底部:未翻面只有一个「显示答案」,翻面后是四档评级
+      if (!this.revealed) {
+        Button('显示答案')
+          .width('90%').height(48).fontSize(16)
+          .margin({ bottom: 20 })
+          .onClick(() => { this.revealed = true; })
+      } else {
+        Row({ space: 8 }) {
+          this.gradeButton(0)
+          this.gradeButton(1)
+          this.gradeButton(2)
+          this.gradeButton(3)
+        }
+        .width('90%').margin({ bottom: 20 })
+      }
+    }
+    .width('100%').height('100%')
+  }
+
+  @Builder
+  done() {
+    Column({ space: 12 }) {
+      Text('今天的一组做完了').fontSize(22).fontWeight(FontWeight.Bold)
+      Text(`本次作答 ${this.answeredThisSession} 次`).fontSize(14).fontColor('#8A8A8E')
+      Text(`剩余待复习 ${this.dueCards} · 新卡 ${this.newCards}`)
+        .fontSize(13).fontColor('#8A8A8E')
+      Button('回到首页')
+        .width('70%').height(44).fontSize(15).margin({ top: 10 })
+        .onClick(() => { this.refreshCounts(); this.stage = Stage.Landing; })
+    }
+    .width('100%').height('100%').justifyContent(FlexAlign.Center)
   }
 
   build() {
-    Column({ space: 10 }) {
-      Text('刻意重复')
-        .fontSize(34)
-        .fontWeight(FontWeight.Bold)
-
-      Text('REPS')
-        .fontSize(15)
-        .fontColor('#8A8A8E')
-        .letterSpacing(3)
-
-      Text(this.tagline)
-        .fontSize(15)
-        .fontColor('#48484A')
-        .margin({ top: 4, bottom: 16 })
-
-      Column({ space: 6 }) {
-        Text(this.dbStatus).fontSize(14).fontColor('#48484A')
-        Text(this.parseLine).fontSize(13).fontColor('#8A8A8E')
-        Text(this.cardLine).fontSize(13).fontColor('#8A8A8E')
-        Text(this.stateLine).fontSize(13).fontColor('#8A8A8E')
-        Text(this.dueLine).fontSize(13).fontColor('#8A8A8E')
-        Text(this.ok ? '排期已推进 ✓' : '')
-          .fontSize(14)
-          .fontColor('#2E9E63')
-          .margin({ top: 6 })
+    Column() {
+      if (this.stage === Stage.Loading) {
+        Text(this.status).fontSize(14).fontColor('#8A8A8E')
+      } else if (this.stage === Stage.Landing) {
+        this.landing()
+      } else if (this.stage === Stage.Card) {
+        this.cardView()
+      } else {
+        this.done()
       }
-      .width('86%')
-      .padding(16)
-      .borderRadius(14)
-      .backgroundColor('#F5F5F7')
     }
-    .width('100%')
-    .height('100%')
+    .width('100%').height('100%').backgroundColor('#FFFFFF')
     .justifyContent(FlexAlign.Center)
-    .backgroundColor('#FFFFFF')
   }
 }
