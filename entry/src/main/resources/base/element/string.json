@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "REPS 主模块"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "刻意重复 间隔重复闪卡"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "刻意重复"
+    }
+  ]
+}

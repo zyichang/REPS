@@ -1,0 +1,17 @@
+{
+  "modelVersion": "6.0.0",
+  "dependencies": {},
+  "execution": {
+    /* 本机 hvigor 需要关闭 daemon:daemon 存活检查会 spawn powershell,在本环境不可用。
+       构建请走 build.cmd,它会带上 --no-daemon。 */
+  },
+  "logging": {
+    "level": "info"
+  },
+  "debugging": {
+    "stacktrace": false
+  },
+  "nodeOptions": {
+    "maxOldSpaceSize": 8192
+  }
+}

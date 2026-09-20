@@ -1,0 +1,52 @@
+{
+  /*
+   * 签名配置故意留空。
+   *
+   * assembleHap 在没有 signingConfigs 的情况下仍会产出 **未签名** 的 HAP,
+   * 桌面测试与清单检查都不需要签名。要装到真机或模拟器上时,请在 DevEco Studio 里
+   * File > Project Structure > Signing Configs 勾选 "Automatically generate signature",
+   * 它会为 bundleName com.reps.app 申请一套证书并把 signingConfigs 写回本文件。
+   *
+   * 本文件因此被 .gitignore 排除(生成的配置里含 keyPassword / storePassword 明文),
+   * 仓库里只保留 build-profile.json5.example。
+   */
+  "app": {
+    "signingConfigs": [],
+    "products": [
+      {
+        "name": "default",
+        "targetSdkVersion": "6.0.0(20)",
+        "compatibleSdkVersion": "5.0.0(12)",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        }
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}

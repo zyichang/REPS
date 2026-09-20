@@ -1,0 +1,29 @@
+# 构建产物
+/build/
+/entry/build/
+/.hvigor/
+/oh_modules/
+/entry/oh_modules/
+build.log
+
+# IDE
+/.idea/
+*.iml
+
+# 签名配置:DevEco 自动生成的 signingConfigs 里含 keyPassword / storePassword 明文,
+# 绝不能进版本库。仓库里只保留 build-profile.json5.example。
+/build-profile.json5
+
+# 设备清单:会记录真机 UDID
+/signing/devices.json
+
+# devtest 从生产源码同步出来的副本(每次跑 sync-and-test.mjs 都会重新生成)
+/devtest/srs.ts
+/devtest/ebbinghaus.ts
+/devtest/Models.ts
+/devtest/Quizify.ts
+/devtest/Schema.ts
+
+# 系统垃圾
+.DS_Store
+Thumbs.db
