@@ -24,6 +24,8 @@ const EXPECT_CJK = new Set([
   'Models.ets',
   'Srs.ets',
   'Ebbinghaus.ets',
+  'Schema.ets',
+  'Database.ets',
 ]);
 
 function walk(dir) {

@@ -51,6 +51,12 @@ const FILES = [
     ["'./Srs'", "'./srs'"],
   ]],
   [join(ets, 'model', 'Models.ets'), join(here, 'Models.ts'), []],
+  // 表结构与行映射。纯逻辑、不碰 @kit.*,所以能直接在 node:sqlite 上执行,
+  // 桌面测试跑的就是生产那份 SQL,不存在手抄副本走样的问题。
+  [join(ets, 'data', 'Schema.ets'), join(here, 'Schema.ts'), [
+    ["'../model/Models'", "'./Models'"],
+    ["'../srs/Srs'", "'./srs'"],
+  ]],
 ];
 
 for (const [src, dst, subs] of FILES) {
@@ -74,6 +80,7 @@ const suites = [
   'smoke_test.ts',
   'srs_test.ts',
   'ebbinghaus_test.ts',
+  'schema_test.ts',
 ];
 
 for (const suite of suites) {
