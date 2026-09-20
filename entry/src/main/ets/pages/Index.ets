@@ -12,17 +12,49 @@
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Database } from '../data/Database';
-import { CardState, Grade, NoteType, PHASE_LABEL } from '../model/Models';
+import { ParsedDeck, parseQuizify } from '../data/Quizify';
+import { CardState, Grade, PHASE_LABEL } from '../model/Models';
 import { formatInterval, newCardState, schedule } from '../srs/Srs';
 
 const DOMAIN: number = 0x0A01;
 const TAG: string = 'REPS-Index';
+
+/**
+ * 内置的一份 Quizify 样例,用来在设备上验证解析器。
+ * Task 5 会换成从用户文件读取。
+ */
+const SAMPLE: string = `---
+quizify:
+  format: 1
+  deck: REPS::自检
+  tags: [REPS, 自检]
+---
+
++++
+
+#### 自检 (1) 刻意重复的英文名是什么?
+***
+REPS —— 一天的量是 a set,一次作答是 a rep。
+
++++
+
+#### 自检 (2) FSRS 里的 S 指什么?
+***
+稳定性(stability),单位是天。数值越大,记得越牢。
+
++++
+
+#### 自检 (3) 一天的分界在几点?
+***
+凌晨 1 点。深夜还在学的人,刚过 0 点不该看到明天的卡。
+`;
 
 @Entry
 @Component
 struct Index {
   @State private tagline: string = '把一本书变成一整副卡组';
   @State private dbStatus: string = '正在打开数据库…';
+  @State private parseLine: string = '';
   @State private cardLine: string = '';
   @State private stateLine: string = '';
   @State private dueLine: string = '';
@@ -47,22 +79,27 @@ struct Index {
 
       const now: number = Date.now();
 
-      // 库里还没有卡就造一张,避免每次启动都堆新卡
-      let cardId: number;
+      // 解析内置样例,证明解析器在设备上也能跑
+      const parsed: ParsedDeck = parseQuizify(SAMPLE);
+      this.parseLine = `解析出 ${parsed.cards.length} 张卡,卡组 ${parsed.deckPath.join(' > ')}`;
+
+      // 库里还没有卡就把样例导进去
       if (this.db.cardCount() === 0) {
-        const deckId: number = this.db.ensureDeck('示例卡组', 0);
-        const ids: number[] = this.db.insertNote(
-          deckId, '示例卡组', NoteType.QA,
-          '刻意重复的英文名是什么?', 'REPS —— 一天的量是 a set,一次作答是 a rep',
-          '自检 (1)', 'self-check', 1, now,
-        );
-        cardId = ids[0];
-      } else {
-        const news: number[] = this.db.newCardIds(1);
-        const dues: number[] = this.db.dueCardIds(now, 1);
-        cardId = news.length > 0 ? news[0] : (dues.length > 0 ? dues[0] : 1);
+        let parentId: number = 0;
+        for (const level of parsed.deckPath) {
+          parentId = this.db.ensureDeck(level, parentId);
+        }
+        for (const c of parsed.cards) {
+          this.db.insertNote(parentId, parsed.deck, c.type, c.front, c.back,
+            c.title, c.key, 'sample', 1, now);
+        }
       }
-      this.cardLine = `共 ${this.db.cardCount()} 张卡,本次用 card_id = ${cardId}`;
+
+      // 优先取到期卡,没有就取新卡
+      const dues: number[] = this.db.dueCardIds(now, 1);
+      const news: number[] = this.db.newCardIds(1);
+      const cardId: number = dues.length > 0 ? dues[0] : (news.length > 0 ? news[0] : 1);
+      this.cardLine = `共 ${this.db.cardCount()} 张卡,待复习 ${dues.length}、新卡 ${news.length},本次用 #${cardId}`;
 
       // 读不到状态说明是新卡
       const prev: CardState | null = this.db.loadState(cardId);
@@ -122,6 +159,7 @@ struct Index {
 
       Column({ space: 6 }) {
         Text(this.dbStatus).fontSize(14).fontColor('#48484A')
+        Text(this.parseLine).fontSize(13).fontColor('#8A8A8E')
         Text(this.cardLine).fontSize(13).fontColor('#8A8A8E')
         Text(this.stateLine).fontSize(13).fontColor('#8A8A8E')
         Text(this.dueLine).fontSize(13).fontColor('#8A8A8E')

@@ -74,9 +74,9 @@ REPS 想把这条链路做成普通人愿意每天打开的样子。
    WordSnap 用了第三方词库(爬取自某词典),导致仓库不能公开放数据。
    REPS 的输入是**用户自己上传的书**,这是结构性优势 —— 别自己内置版权内容。
 
-## ArkUI 的一个陷阱(平台相关,但必读)
+## ArkTS 的几个陷阱(平台相关,但必读)
 
-**UI 只能依赖 `@State` / `@StorageLink`,绝不能依赖普通对象字段。**
+**1. UI 只能依赖 `@State` / `@StorageLink`,绝不能依赖普通对象字段。**
 
 按值传参的 `@Builder` 不会响应更新 —— WordSnap 在这件事上踩了**四次**:
 `landingStat(value, label)`、一个 `if (store.algo === 'fsrs')` 的条件渲染、
@@ -84,6 +84,24 @@ REPS 想把这条链路做成普通人愿意每天打开的样子。
 查起来很费时间,因为编译器完全不报错。
 
 修法是**常量选择器 `@Builder`**:传一个常量下标进去,值在 Builder 内部从 `@State` 读。
+
+**2. ArkTS 只编译从入口可达的文件。**
+
+新写的模块如果没有任何文件 import 它,编译器直接跳过 —— `BUILD SUCCESSFUL` 对它
+毫无意义。REPS 的 `Database.ets` / `Schema.ets` / `Quizify.ets` 都中过这一枪。
+验证手段:解包 HAP,`grep` 一下 `entry/build/.../modules.abc` 里有没有那些符号名。
+
+**3. ArkTS 不支持嵌套函数声明(`arkts-no-nested-funcs`)。**
+
+`function outer() { function inner() {} }` 直接编译失败。桌面测试台**测不出这类限制**,
+因为 TypeScript 允许 —— `Quizify.ets` 的 51 条断言全绿之后编译才报错。
+所以**编译必须是每个任务的验证环节,不能只跑桌面测试**。
+赋值给变量的箭头函数(`const f = () => {}`)是允许的,受限的只是 `function` 声明。
+
+**4. 中文不要穿过 hdc 的 shell。**
+
+`hdc shell "sqlite3 ... '中文'"` 会把中文吃成 `??`,还可能连带截断 SQL。
+查设备数据库时 SQL 一律用纯 ASCII。
 
 ## 还没决定
 

@@ -57,6 +57,10 @@ const FILES = [
     ["'../model/Models'", "'./Models'"],
     ["'../srs/Srs'", "'./srs'"],
   ]],
+  // Quizify 解析器。同样是纯逻辑,畸形输入的报错行为全靠桌面测试盯住。
+  [join(ets, 'data', 'Quizify.ets'), join(here, 'Quizify.ts'), [
+    ["'../model/Models'", "'./Models'"],
+  ]],
 ];
 
 for (const [src, dst, subs] of FILES) {
@@ -81,6 +85,7 @@ const suites = [
   'srs_test.ts',
   'ebbinghaus_test.ts',
   'schema_test.ts',
+  'parser_test.ts',
 ];
 
 for (const suite of suites) {

@@ -137,17 +137,18 @@ export class Database {
   /**
    * 写入一条笔记及其卡片,返回卡片 id 列表。
    *
+   * title 与 key 是两回事,不能混:
+   *   title 是 #### 的完整原文,给人看的(含题干);
+   *   key   是标识部分(如「基础选择 (1)」),指纹取它。
+   * 用 title 算指纹的话,用户改一个错别字就会被当成新卡,进度全丢。
+   *
    * cardCount 由题型决定:问答与选择题恒为 1,完形填空等于挖空个数。
    */
   insertNote(deckId: number, deckName: string, type: NoteType, front: string, back: string,
-             title: string, sourceFile: string, cardCount: number, now: number): number[] {
-    const fp: string = fingerprintOf(deckName, title, 0);
-    this.db().executeSync(SQL_INSERT_NOTE, [
-      deckId, type as number, front, back, title, sourceFile,
-      fp, makeUuid('n', now), now,
-    ] as Array<relationalStore.ValueType>);
-
-    const noteId: number = this.lastInsertId('notes');
+             title: string, key: string, sourceFile: string, cardCount: number,
+             now: number): number[] {
+    const noteId: number = this.insertNoteRow(deckId, deckName, type, front, back,
+      title, key, sourceFile, 0, now);
     const ids: number[] = [];
     for (let i = 0; i < cardCount; i++) {
       this.db().executeSync(SQL_INSERT_CARD,
@@ -155,6 +156,17 @@ export class Database {
       ids.push(this.lastInsertId('cards'));
     }
     return ids;
+  }
+
+  private insertNoteRow(deckId: number, deckName: string, type: NoteType, front: string,
+                        back: string, title: string, key: string, sourceFile: string,
+                        ordinal: number, now: number): number {
+    const fp: string = fingerprintOf(deckName, key, ordinal);
+    this.db().executeSync(SQL_INSERT_NOTE, [
+      deckId, type as number, front, back, title, sourceFile,
+      fp, makeUuid('n', now), now,
+    ] as Array<relationalStore.ValueType>);
+    return this.lastInsertId('notes');
   }
 
   private lastInsertId(table: string): number {
