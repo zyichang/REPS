@@ -1,44 +1,72 @@
-# Anki
+# REPS · 刻意重复
 
-A personal spaced-repetition flashcard app for building and reviewing my own knowledge base.
+A spaced-repetition flashcard app for building and reviewing a personal knowledge base.
 
-## Motivation
+**中文名:刻意重复。** 英文名 **REPS** —— 取「repetitions」之意:
+健身用一组一组的 reps 长肌肉,记忆也一样,靠一次次刻意的重复长下来。
+所以一天的学习量是 *a set*,一次作答是 *a rep*。
 
-I want a place to collect the things I need to memorize and review them efficiently using spaced repetition. I'm not fully satisfied with the existing Anki software, so this project is my attempt to build an alternative that fits the way I want to learn — while also being a way for me to learn how such an app works.
+本项目的构想来自 **Anki** 这一类 flashcard 软件(间隔重复 / spaced repetition),
+但不是它的移植或分支:代码、数据结构与排期实现都是重新设计的。
+
+## Why another one
+
+Anki 把卡片的**编写**交给用户 —— 那恰恰是最费时间、最容易放弃的一步。
+REPS 想解决的是这一步:
+
+> 丢进一本书,得到一整副卡组。
+
+上传一份 Markdown(比如《数据结构》),它被切成知识点,再按卡片类型生成题目:
+完形填空、问答、选择题。一万个知识点就是一万张卡,不需要手工录入。
+
+这个思路在 SuperMemo 里叫 **incremental reading**(渐进阅读);
+REPS 想做的是把它做成一个普通人愿意每天打开的样子。
 
 ## Goals
 
-- Build a personal **knowledge base** of cards (things I need to memorize).
-- Use **spaced repetition** to schedule reviews.
-- Run natively on mobile: **Android**, **iOS**, and **HarmonyOS**.
-- Keep the experience simple and focused on studying.
+- **Book → deck.** 以 Markdown 文件为输入,自动切分知识点并生成卡片。
+- **多种卡片类型.** 完形填空 / 问答 / 选择题,由卡片的数据结构决定。
+- **可选的排期算法.** 默认 FSRS-6,另提供经典艾宾浩斯固定阶梯等选项,
+  让用户自己决定相信哪一套。
+- **排期透明.** 每张卡为什么排在今天、下一次为什么是这个间隔,都能查到。
+- **数据属于用户.** 本地优先,随时可整库导出。
 
-## Target Platforms
+## Scheduling
 
-| Platform  | Status  |
-| --------- | ------- |
-| Android   | Planned |
-| iOS       | Planned |
-| HarmonyOS | Planned |
+主引擎是 **FSRS-6**(Free Spaced Repetition Scheduler):
+为每张卡维护稳定性 S、难度 D、可提取性 R,再由目标保持率反解下次间隔。
 
-## Tech Stack
+同时保留一个**固定阶梯**引擎(5 分钟 → 30 分钟 → 12 小时 → 1/2/4/7/15/30/60/120 天),
+答对前进一格、答错退回第一格 —— 完全可预测,代价是不会因词而异地自适应。
+两者共用同一份学习记录,可以随时切换而不丢进度。
 
-*To be decided.* A cross-platform framework is being considered to share code across all three platforms.
+## Target platform
 
-> Note: HarmonyOS support in most cross-platform frameworks is still limited and may need a separate or native implementation.
+**Web app first.** 先做浏览器端,一份代码到处能用,也方便把上传、切分、生成
+这条链路跑通。移动端(Android / iOS / HarmonyOS)留在后面,视需要再说。
+
+> 早先的设想是直接做三端原生,现在调整为 Web 优先 ——
+> 核心价值在「把书变成卡组」这条链路,不在多端覆盖。
 
 ## Status
 
-🚧 Early development — just getting started.
+🚧 Early development — 刚定下名字和方向。
 
 ## Roadmap
 
-- [ ] Decide on the app name and tech stack
-- [ ] Design the card and deck data model
-- [ ] Implement a basic spaced-repetition algorithm
-- [ ] Build the card review UI
-- [ ] Add create / edit / delete for cards and decks
-- [ ] Local storage and data persistence
-- [ ] Android build
-- [ ] iOS build
-- [ ] HarmonyOS build
+- [x] 定下项目名称(REPS / 刻意重复)
+- [ ] 选定技术栈(Web 前端 + 本地存储方案)
+- [ ] 设计卡片与卡组的数据模型(支持三种题型)
+- [ ] Markdown 解析:一本书 → 知识点 → 卡片
+- [ ] 接入 FSRS-6 排期
+- [ ] 加入固定阶梯算法作为可选引擎
+- [ ] 复习界面(含作答与评级)
+- [ ] 卡片/卡组的增删改
+- [ ] 数据导入导出
+- [ ] 统计面板(保持率、复习量预测、薄弱知识点)
+
+## A note on Anki
+
+REPS 借用的是 **idea**(间隔重复 + 卡片),不是 Anki 的代码。
+Anki 以 AGPL-3.0 发布,若将来真要移植它的任何实现,必须连带遵守该许可证;
+本项目不打算这样做,排期与存储都会自行实现。
