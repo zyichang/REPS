@@ -16,11 +16,15 @@ import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { CardState, NoteType, ReviewLog } from '../model/Models';
 import {
-  DDL, ReviewCardRow, SQL_COUNT_CARDS, SQL_COUNT_DUE, SQL_COUNT_NEW, SQL_DUE_CARDS,
-  SQL_INSERT_CARD, SQL_INSERT_DECK, SQL_INSERT_LOG, SQL_INSERT_NOTE, SQL_NEW_CARDS,
-  SQL_SELECT_DECK_ID, SQL_SELECT_NOTE_BY_CARD, SQL_SELECT_SCHEDULING,
-  SQL_UPSERT_SCHEDULING, SchedulingRow, fingerprintOf, fromSchedulingRow,
-  isValidAlgo, makeUuid, schedulingValues, toSchedulingRow,
+  DDL, DeckRow, LogPoint, ReviewCardRow, SQL_COUNT_CARDS, SQL_COUNT_DUE,
+  SQL_COUNT_NEW, SQL_DELETE_DECK, SQL_DELETE_DECK_CARDS, SQL_DELETE_DECK_LOGS,
+  SQL_DELETE_DECK_NOTES, SQL_DELETE_DECK_SCHED, SQL_DUE_CARDS, SQL_DUE_CARDS_IN_DECK,
+  SQL_DUE_FORECAST, SQL_INSERT_CARD, SQL_INSERT_DECK, SQL_INSERT_LOG, SQL_INSERT_NOTE,
+  SQL_LIST_DECKS, SQL_LOG_SINCE, SQL_NEW_CARDS, SQL_NEW_CARDS_IN_DECK,
+  SQL_SELECT_DECK_ID, SQL_SELECT_DECK_PARENT, SQL_SELECT_NOTE_BY_CARD,
+  SQL_SELECT_SCHEDULING, SQL_STABILITY_HISTOGRAM, SQL_UPSERT_SCHEDULING,
+  SchedulingRow, fingerprintOf, fromSchedulingRow, isValidAlgo, makeUuid,
+  schedulingValues, toSchedulingRow,
 } from './Schema';
 
 const DOMAIN: number = 0x0A01;
@@ -234,5 +238,125 @@ export class Database {
     } finally {
       rs.close();
     }
+  }
+
+  // ------------------------------------------------------------ 卡组一览
+
+  /** 列出所有挂了卡片的卡组,每组带卡片数 / 待复习 / 新卡 */
+  listDecks(now: number): DeckRow[] {
+    const rs = this.db().querySqlSync(SQL_LIST_DECKS, [now]);
+    const out: DeckRow[] = [];
+    try {
+      while (rs.goToNextRow()) {
+        out.push({
+          id: rs.getLong(rs.getColumnIndex('id')),
+          name: rs.getString(rs.getColumnIndex('name')),
+          parentId: rs.getLong(rs.getColumnIndex('parent_id')),
+          cards: rs.getLong(rs.getColumnIndex('cards')),
+          due: rs.getLong(rs.getColumnIndex('due')),
+          fresh: rs.getLong(rs.getColumnIndex('fresh')),
+        });
+      }
+    } finally {
+      rs.close();
+    }
+    return out;
+  }
+
+  /** 卡组的完整路径,如 `Math_880 > Chapter_2`。最多向上找 8 层,防环 */
+  deckPath(deckId: number): string {
+    const parts: string[] = [];
+    let id = deckId;
+    for (let i = 0; i < 8 && id > 0; i++) {
+      const rs = this.db().querySqlSync(SQL_SELECT_DECK_PARENT, [id]);
+      try {
+        if (!rs.goToFirstRow()) {
+          break;
+        }
+        parts.unshift(rs.getString(rs.getColumnIndex('name')));
+        id = rs.getLong(rs.getColumnIndex('parent_id'));
+      } finally {
+        rs.close();
+      }
+    }
+    return parts.join(' > ');
+  }
+
+  /** 按卡组取到期卡;deckId 为 0 表示全部卡组 */
+  dueCardIdsInDeck(deckId: number, now: number, limit: number): number[] {
+    if (deckId === 0) {
+      return this.dueCardIds(now, limit);
+    }
+    return this.idColumn(this.db().querySqlSync(SQL_DUE_CARDS_IN_DECK, [deckId, now, limit]));
+  }
+
+  newCardIdsInDeck(deckId: number, limit: number): number[] {
+    if (deckId === 0) {
+      return this.newCardIds(limit);
+    }
+    return this.idColumn(this.db().querySqlSync(SQL_NEW_CARDS_IN_DECK, [deckId, limit]));
+  }
+
+  /** 删除一个卡组连同它的全部内容。顺序必须从子表往父表删 */
+  deleteDeck(deckId: number): void {
+    const d = this.db();
+    d.executeSync(SQL_DELETE_DECK_LOGS, [deckId] as Array<relationalStore.ValueType>);
+    d.executeSync(SQL_DELETE_DECK_SCHED, [deckId] as Array<relationalStore.ValueType>);
+    d.executeSync(SQL_DELETE_DECK_CARDS, [deckId] as Array<relationalStore.ValueType>);
+    d.executeSync(SQL_DELETE_DECK_NOTES, [deckId] as Array<relationalStore.ValueType>);
+    d.executeSync(SQL_DELETE_DECK, [deckId] as Array<relationalStore.ValueType>);
+  }
+
+  // ------------------------------------------------------------ 统计
+
+  /** 取某时刻之后的全部复习流水。分桶交给 Schema.bucketByDay(日界口径一致) */
+  logsSince(since: number): LogPoint[] {
+    const rs = this.db().querySqlSync(SQL_LOG_SINCE, [since]);
+    const out: LogPoint[] = [];
+    try {
+      const iTs = rs.getColumnIndex('ts');
+      const iGrade = rs.getColumnIndex('grade');
+      const iCard = rs.getColumnIndex('card_id');
+      while (rs.goToNextRow()) {
+        out.push({
+          ts: rs.getLong(iTs),
+          grade: rs.getLong(iGrade),
+          cardId: rs.getLong(iCard),
+        });
+      }
+    } finally {
+      rs.close();
+    }
+    return out;
+  }
+
+  /** 未来 from~to 之间的到期时刻,用于复习量预测 */
+  dueForecast(from: number, to: number): number[] {
+    const rs = this.db().querySqlSync(SQL_DUE_FORECAST, [from, to]);
+    const out: number[] = [];
+    try {
+      const i = rs.getColumnIndex('due');
+      while (rs.goToNextRow()) {
+        out.push(rs.getLong(i));
+      }
+    } finally {
+      rs.close();
+    }
+    return out;
+  }
+
+  /** 全部卡片的稳定性,用于掌握度直方图 */
+  stabilities(): number[] {
+    const rs = this.db().querySqlSync(SQL_STABILITY_HISTOGRAM);
+    const out: number[] = [];
+    try {
+      const i = rs.getColumnIndex('stability');
+      while (rs.goToNextRow()) {
+        out.push(rs.getDouble(i));
+      }
+    } finally {
+      rs.close();
+    }
+    return out;
   }
 }

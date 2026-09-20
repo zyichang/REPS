@@ -11,10 +11,12 @@
 import { DatabaseSync } from 'node:sqlite';
 import { CardState, Grade, LearnPhase } from './Models';
 import {
-  DAY_CUTOFF_HOUR, DAY_CUTOFF_MS, DDL, LOG_COLUMNS, SCHED_COLUMNS,
+  DAY_CUTOFF_HOUR, DAY_CUTOFF_MS, DDL, DayBucket, LOG_COLUMNS, LogPoint, SCHED_COLUMNS,
   SQL_DUE_CARDS, SQL_INSERT_LOG, SQL_NEW_CARDS, SQL_SELECT_SCHEDULING,
-  SQL_UPSERT_SCHEDULING, SchedulingRow, dayIndex, dayStart, fingerprintOf,
-  fromSchedulingRow, isValidAlgo, makeUuid, schedulingValues, toSchedulingRow,
+  SQL_STABILITY_HISTOGRAM, SQL_UPSERT_SCHEDULING, SchedulingRow, dayIndex,
+  dayStart, fingerprintOf,
+  bucketByDay, fromSchedulingRow, isValidAlgo, makeUuid, retentionOf,
+  schedulingValues, toSchedulingRow,
 } from './Schema';
 import { newCardState, schedule, setAlgorithm, setRandomSource } from './srs';
 
@@ -254,6 +256,66 @@ const u1 = makeUuid('n', 1_700_000_000_000);
 const u2 = makeUuid('n', 1_700_000_000_000);
 check('uuid 带前缀', u1.startsWith('n-'), u1);
 check('同一毫秒内两次生成也不相同', u1 !== u2, `${u1} / ${u2}`);
+
+// ================================================================ 8. 统计聚合
+console.log('\n=== 8. 热力图分桶与保持率 ===');
+
+// 构造:1/15 三次、1/16 一次,其中 1/15 00:30 那次按日界算属于 1/14
+const t15_0030 = new Date(2026, 0, 15, 0, 30, 0).getTime();  // -> 1/14
+const t15_1000 = new Date(2026, 0, 15, 10, 0, 0).getTime();  // -> 1/15
+const t15_2300 = new Date(2026, 0, 15, 23, 0, 0).getTime();  // -> 1/15
+const t16_1200 = new Date(2026, 0, 16, 12, 0, 0).getTime();  // -> 1/16
+
+const pts: LogPoint[] = [
+  { ts: t15_0030, grade: 2, cardId: 1 },
+  { ts: t15_1000, grade: 2, cardId: 1 },
+  { ts: t15_2300, grade: 0, cardId: 2 },
+  { ts: t16_1200, grade: 3, cardId: 1 },
+];
+const buckets: DayBucket[] = bucketByDay(pts);
+
+check('分出三天(00:30 那次归前一天)', buckets.length === 3,
+  buckets.map((b) => `${b.day}:${b.reps}`).join(' '));
+check('分桶按日序号升序', buckets[0].day < buckets[1].day && buckets[1].day < buckets[2].day);
+check('第一天只有 1 次(就是 00:30 那次)', buckets[0].reps === 1);
+check('第二天有 2 次', buckets[1].reps === 2, `${buckets[1].reps}`);
+check('第二天答对 1 次(另一次是「忘了」)', buckets[1].good === 1, `${buckets[1].good}`);
+check('第三天 1 次且答对', buckets[2].reps === 1 && buckets[2].good === 1);
+check('分桶用的是 dayIndex 的口径', buckets[0].day === dayIndex(t15_0030));
+
+// 保持率:新卡首答不计入 —— 那时还没有任何记忆可供「保持」
+// card 1 出现 3 次:第 1 次是首答(不计),第 2、3 次计入且都答对
+// card 2 出现 1 次:首答,不计
+// 所以 total=2, good=2 -> 100%
+check('保持率排除新卡首答', Math.abs(retentionOf(pts) - 1.0) < 1e-9,
+  `${(retentionOf(pts) * 100).toFixed(0)}%`);
+
+const pts2: LogPoint[] = [
+  { ts: 1000, grade: 2, cardId: 1 },   // 首答,不计
+  { ts: 2000, grade: 0, cardId: 1 },   // 计入,失败
+  { ts: 3000, grade: 2, cardId: 1 },   // 计入,成功
+];
+check('一半答对时保持率为 50%', Math.abs(retentionOf(pts2) - 0.5) < 1e-9,
+  `${(retentionOf(pts2) * 100).toFixed(0)}%`);
+check('没有复习记录时保持率为 0 而不是 NaN', retentionOf([]) === 0);
+check('只有新卡首答时保持率为 0',
+  retentionOf([{ ts: 1, grade: 2, cardId: 9 }]) === 0);
+check('空输入分桶得到空数组', bucketByDay([]).length === 0);
+
+// ---- 掌握度直方图的口径:各档之和必须等于卡片总数 ----
+// 这是 WordSnap 栽过的那类 bug:只查 scheduling 会漏掉没答过的卡,
+// 于是「未学」永远是 0,各档之和也对不上总数。
+const histRows = db.prepare(SQL_STABILITY_HISTOGRAM).all() as Array<{ stability: number }>;
+const totalCards = (db.prepare(`SELECT COUNT(*) AS n FROM cards`).get() as { n: number }).n;
+check('稳定性直方图覆盖全部卡片,不只是答过的',
+  histRows.length === totalCards, `直方图 ${histRows.length} 行 / 卡片 ${totalCards} 张`);
+
+const schedCount = (db.prepare(`SELECT COUNT(*) AS n FROM scheduling`).get() as { n: number }).n;
+check('确实存在没答过的卡(否则上一条断言没有说服力)',
+  totalCards > schedCount, `${totalCards} 张卡中 ${schedCount} 张有排期`);
+check('没答过的卡以 stability = 0 出现(masteryOf(0) 归入未学)',
+  histRows.filter((r) => r.stability === 0).length === totalCards - schedCount,
+  `${histRows.filter((r) => r.stability === 0).length} 行为 0`);
 
 db.close();
 

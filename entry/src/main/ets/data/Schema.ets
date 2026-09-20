@@ -289,6 +289,93 @@ export const SQL_COUNT_CARDS_IN_DECK: string =
      JOIN notes n ON n.id = c.note_id
     WHERE n.deck_id = ?`;
 
+// ---------------------------------------------------------------- 卡组一览
+
+/**
+ * 卡组一览:每组的卡片数、待复习数、新卡数。
+ *
+ * **每个卡组的计数必须各自独立** —— 这是 WordSnap 的教训,当年把额度存成
+ * 全局 key,结果 A 书点一次「学习更多」,B 书也凭空多出额度。
+ *
+ * 只列出真正挂了卡片的卡组:`A::B` 会建出 A 与 B 两行,但卡片全挂在 B 上,
+ * A 只是层级容器,列出来会让用户看到一堆 0 卡的空组。
+ */
+export const SQL_LIST_DECKS: string =
+  `SELECT d.id, d.name, d.parent_id,
+          COUNT(c.id) AS cards,
+          SUM(CASE WHEN s.card_id IS NOT NULL AND s.due <= ? THEN 1 ELSE 0 END) AS due,
+          SUM(CASE WHEN s.card_id IS NULL THEN 1 ELSE 0 END) AS fresh
+     FROM decks d
+     JOIN notes n ON n.deck_id = d.id
+     JOIN cards c ON c.note_id = n.id
+     LEFT JOIN scheduling s ON s.card_id = c.id
+    GROUP BY d.id
+    HAVING cards > 0
+    ORDER BY d.name ASC`;
+
+/** 卡组的完整路径靠 parent_id 逐级往上找 */
+export const SQL_SELECT_DECK_PARENT: string =
+  `SELECT id, name, parent_id FROM decks WHERE id = ?`;
+
+/** 按卡组取到期卡。deck_id = 0 时用 SQL_DUE_CARDS 取全部 */
+export const SQL_DUE_CARDS_IN_DECK: string =
+  `SELECT c.id AS card_id
+     FROM cards c
+     JOIN notes n ON n.id = c.note_id
+     JOIN scheduling s ON s.card_id = c.id
+    WHERE n.deck_id = ? AND s.due <= ?
+    ORDER BY s.due ASC LIMIT ?`;
+
+export const SQL_NEW_CARDS_IN_DECK: string =
+  `SELECT c.id AS card_id
+     FROM cards c
+     JOIN notes n ON n.id = c.note_id
+     LEFT JOIN scheduling s ON s.card_id = c.id
+    WHERE n.deck_id = ? AND s.card_id IS NULL
+    ORDER BY c.id ASC LIMIT ?`;
+
+/** 删除一个卡组连同它的笔记、卡片、排期与流水 */
+export const SQL_DELETE_DECK_LOGS: string =
+  `DELETE FROM review_log WHERE card_id IN
+     (SELECT c.id FROM cards c JOIN notes n ON n.id = c.note_id WHERE n.deck_id = ?)`;
+export const SQL_DELETE_DECK_SCHED: string =
+  `DELETE FROM scheduling WHERE card_id IN
+     (SELECT c.id FROM cards c JOIN notes n ON n.id = c.note_id WHERE n.deck_id = ?)`;
+export const SQL_DELETE_DECK_CARDS: string =
+  `DELETE FROM cards WHERE note_id IN (SELECT id FROM notes WHERE deck_id = ?)`;
+export const SQL_DELETE_DECK_NOTES: string = `DELETE FROM notes WHERE deck_id = ?`;
+export const SQL_DELETE_DECK: string = `DELETE FROM decks WHERE id = ?`;
+
+// ---------------------------------------------------------------- 统计
+
+/**
+ * 按天聚合的复习量,供热力图使用。
+ *
+ * 分桶用的是**本地日序号**(dayIndex 的口径,凌晨 1 点分界),
+ * 所以不能直接在 SQL 里按 UTC 除法分桶 —— 时区与 1 小时偏移都会错位。
+ * 这里只把原始 (ts, grade) 取出来,分桶交给 dayIndex() 在 ArkTS 侧做,
+ * 保证与界面上其他地方的「今天」是同一个定义。
+ */
+export const SQL_LOG_SINCE: string =
+  `SELECT ts, grade, card_id FROM review_log WHERE ts >= ? ORDER BY ts ASC`;
+
+/** 未来若干天的到期量预测 */
+export const SQL_DUE_FORECAST: string =
+  `SELECT due FROM scheduling WHERE due > ? AND due <= ? ORDER BY due ASC`;
+
+/**
+ * 稳定性分布,用于「掌握度」直方图。
+ *
+ * **必须 LEFT JOIN 从 cards 出发,不能只查 scheduling。** 没答过的卡没有
+ * scheduling 行,只查 scheduling 会把它们整批漏掉,于是「未学」永远是 0,
+ * 而各档之和也对不上卡片总数 —— WordSnap 当年就栽在这种分子分母不一致上
+ * (统计页显示「已学 91 / 3732」,分子含了分母不含的那批)。
+ * COALESCE 让没答过的卡以 stability = 0 出现,masteryOf(0) 正好归到「未学」。
+ */
+export const SQL_STABILITY_HISTOGRAM: string =
+  `SELECT COALESCE(s.stability, 0) AS stability
+     FROM cards c LEFT JOIN scheduling s ON s.card_id = c.id`;
+
 /** 按指纹找已有笔记(Task 7 幂等重导用) */
 export const SQL_SELECT_NOTE_BY_FINGERPRINT: string =
   `SELECT id FROM notes WHERE fingerprint = ?`;
@@ -301,6 +388,83 @@ export const SQL_COUNT_NEW: string =
   `SELECT COUNT(*) AS n FROM cards c
      LEFT JOIN scheduling s ON s.card_id = c.id
     WHERE s.card_id IS NULL`;
+
+/** 卡组一览里的一行 */
+export interface DeckRow {
+  id: number;
+  name: string;
+  parentId: number;
+  cards: number;
+  due: number;
+  fresh: number;
+}
+
+/** 一条复习流水,热力图与保持率都由它聚合 */
+export interface LogPoint {
+  ts: number;
+  grade: number;
+  cardId: number;
+}
+
+/** 热力图的一格 */
+export interface DayBucket {
+  /** 本地日序号 */
+  day: number;
+  /** 当天的作答次数 */
+  reps: number;
+  /** 当天答对(grade >= 2)的次数 */
+  good: number;
+}
+
+/**
+ * 把复习流水按**本地日序号**分桶。
+ *
+ * 为什么不在 SQL 里除法分桶:日界是凌晨 1 点且要按本地时区,
+ * SQL 里按 UTC 毫秒除以 86400000 会同时错在时区和那 1 小时上,
+ * 于是「今天」在热力图和在首页是两个不同的日子。分桶必须走 dayIndex()。
+ */
+export function bucketByDay(points: LogPoint[]): DayBucket[] {
+  const map = new Map<number, DayBucket>();
+  for (const p of points) {
+    const d = dayIndex(p.ts);
+    const b = map.get(d);
+    if (b === undefined) {
+      map.set(d, { day: d, reps: 1, good: p.grade >= 2 ? 1 : 0 });
+    } else {
+      b.reps++;
+      if (p.grade >= 2) {
+        b.good++;
+      }
+    }
+  }
+  const out: DayBucket[] = [];
+  map.forEach((v: DayBucket) => out.push(v));
+  out.sort((a: DayBucket, b: DayBucket) => a.day - b.day);
+  return out;
+}
+
+/**
+ * 保持率 = 答对次数 / 总作答次数,只算**复习**不算新卡首答。
+ *
+ * 新卡的第一次作答不该计入保持率:那时候还没有任何记忆可供「保持」,
+ * 把它算进去会让数字被新卡量左右,失去意义。
+ * 这里靠「该卡在此之前是否出现过」来判断。
+ */
+export function retentionOf(points: LogPoint[]): number {
+  const seen = new Set<number>();
+  let total = 0;
+  let good = 0;
+  for (const p of points) {
+    if (seen.has(p.cardId)) {
+      total++;
+      if (p.grade >= 2) {
+        good++;
+      }
+    }
+    seen.add(p.cardId);
+  }
+  return total === 0 ? 0 : good / total;
+}
 
 /**
  * 复习界面需要的一整张卡(笔记内容 + 卡片序号)。
