@@ -76,35 +76,6 @@ const W_UPPER: number[] = [
   0.8
 ];
 
-/**
- * 每个权重的中文名。
- *
- * 这 21 个数对用户是黑盒,但「能不能调」和「调的时候知不知道在调什么」是两件事。
- * 标出含义后,至少能看出 w[0..3] 是四档初始稳定性、w[20] 是遗忘曲线形状。
- */
-export const W_LABEL: string[] = [
-  '初始稳定性·陌生',
-  '初始稳定性·困难',
-  '初始稳定性·认识',
-  '初始稳定性·简单',
-  '初始难度基准',
-  '初始难度·评级敏感度',
-  '难度变化步长',
-  '难度均值回归强度',
-  '稳定性增长基准',
-  '稳定性增长·难度衰减',
-  '稳定性增长·可提取性权重',
-  '遗忘后稳定性基准',
-  '遗忘后·难度影响',
-  '遗忘后·稳定性影响',
-  '遗忘后·可提取性影响',
-  '困难惩罚系数',
-  '简单奖励系数',
-  '同日重复·评级敏感度',
-  '同日重复·偏移',
-  '同日重复·稳定性衰减',
-  '遗忘曲线衰减率'
-];
 
 const STABILITY_MIN = 0.001;
 const INITIAL_STABILITY_MAX = 100.0;
@@ -350,19 +321,41 @@ function fuzzInterval(days: number): number {
 // ---------------------------------------------------------------- 展示辅助
 
 /** 间隔文案:不足 1 天显示小时/分钟 */
+/**
+ * 间隔单位。**由外部注入,不在这里 import i18n** ——
+ * 本模块是纯逻辑、要在桌面上跑回归测试,不能牵进界面依赖。
+ * 默认中文,所以桌面测试的断言不受影响;AppStore 在初始化和切语言时覆盖它。
+ */
+interface Units {
+  year: string;
+  month: string;
+  day: string;
+  hour: string;
+  minute: string;
+}
+
+let UNITS: Units = {
+  year: ' 年', month: ' 个月', day: ' 天', hour: ' 小时', minute: ' 分钟',
+};
+
+export function setIntervalUnits(year: string, month: string, day: string,
+                                 hour: string, minute: string): void {
+  UNITS = { year: year, month: month, day: day, hour: hour, minute: minute };
+}
+
 export function formatInterval(days: number): string {
   if (days >= 365) {
-    return (days / 365).toFixed(1) + ' 年';
+    return (days / 365).toFixed(1) + UNITS.year;
   }
   if (days >= 30) {
-    return (days / 30).toFixed(1) + ' 个月';
+    return (days / 30).toFixed(1) + UNITS.month;
   }
   if (days >= 1) {
-    return Math.round(days) + ' 天';
+    return Math.round(days) + UNITS.day;
   }
   const mins = days * 1440;
   if (mins >= 60) {
-    return Math.round(mins / 60) + ' 小时';
+    return Math.round(mins / 60) + UNITS.hour;
   }
   return Math.max(1, Math.round(mins)) + ' 分钟';
 }
@@ -551,6 +544,26 @@ export function scheduleFsrs(prev: CardState, grade: Grade, now: number, fuzz?: 
     const graduate = learnSteps.length === 0
       || (curStep >= learnSteps.length && grade !== Grade.Again);
 
+    /*
+     * **「简单」不再让没毕业的卡跳过学习步进。**
+     *
+     * 官方 FSRS 里 Easy 会从学习阶段直接毕业。配上按耗时自动判档,就变成
+     * 「10 秒内答对 = 这张新卡直接排到一周以后」—— 一次曝光就当学会了,
+     * 而四选一还有 25% 的猜中率,蒙对且蒙得快的卡会被直接推走。
+     *
+     * 改成 Easy 在**步进上**等同 Good:第一次答对走到下一格(10 分钟后),
+     * 第二次答对才毕业,也就是「新词当天至少过两遍」。
+     *
+     * 只动毕业判断、**不动记忆状态** —— 上面算 stability / difficulty 的部分
+     * 仍然吃真实评级,所以 Easy 照样给出 w[3] 的初始稳定性,毕业后的间隔
+     * 比 Good 更长。这样既拿到了「答得快」这个信息,又没有跳过确认。
+     * 这也是 devtest/srs_test.ts 里那组 FSRS 对齐断言仍然成立的原因。
+     *
+     * 放在调度器里而不是界面的自动判档里:**手动点「简单」按钮走的是另一条路**,
+     * 只改自动判档的话新卡上手动点简单照样会毕业,洞还在。
+     */
+    const passed = grade === Grade.Good || grade === Grade.Easy;
+
     if (graduate) {
       phase = LearnPhase.Review;
       step = 0;
@@ -561,18 +574,13 @@ export function scheduleFsrs(prev: CardState, grade: Grade, now: number, fuzz?: 
       step = 0;
       intervalDays = learnSteps.length > 0 ? learnSteps[0] / 1440 : nextInterval(s.stability);
       reason = reason + `;${formatInterval(intervalDays)}后再认一次`;
-    } else if (grade === Grade.Easy) {
-      phase = LearnPhase.Review;
-      step = 0;
-      intervalDays = nextInterval(s.stability);
-      reason = reason + `;评为简单,直接毕业,排期 ${formatInterval(intervalDays)} 后`;
-    } else if (grade === Grade.Good && curStep + 1 >= learnSteps.length) {
+    } else if (passed && curStep + 1 >= learnSteps.length) {
       phase = LearnPhase.Review;
       step = 0;
       intervalDays = nextInterval(s.stability);
       reason = reason + `;走完学习步进,排期 ${formatInterval(intervalDays)} 后`;
     } else {
-      const nextStep = grade === Grade.Good ? curStep + 1 : curStep;
+      const nextStep = passed ? curStep + 1 : curStep;
       phase = LearnPhase.Learning;
       step = nextStep;
       intervalDays = stepInterval(learnSteps, nextStep, grade) / 1440;

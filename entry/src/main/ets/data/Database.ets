@@ -16,16 +16,22 @@ import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { CardState, NoteType, ReviewLog } from '../model/Models';
 import {
-  DDL, DeckRow, LogPoint, ReviewCardRow, SQL_COUNT_CARDS, SQL_COUNT_DUE,
-  SQL_COUNT_NEW, SQL_DELETE_DECK, SQL_DELETE_DECK_CARDS, SQL_DELETE_DECK_LOGS,
-  SQL_DELETE_DECK_NOTES, SQL_DELETE_DECK_SCHED, SQL_DUE_CARDS, SQL_DUE_CARDS_IN_DECK,
-  SQL_DUE_FORECAST, SQL_INSERT_CARD, SQL_INSERT_DECK, SQL_INSERT_LOG, SQL_INSERT_NOTE,
-  SQL_LIST_DECKS, SQL_LOG_SINCE, SQL_NEW_CARDS, SQL_NEW_CARDS_IN_DECK,
-  SQL_SELECT_DECK_ID, SQL_SELECT_DECK_PARENT, SQL_SELECT_NOTE_BY_CARD,
-  SQL_SELECT_SCHEDULING, SQL_STABILITY_HISTOGRAM, SQL_UPSERT_SCHEDULING,
-  SchedulingRow, fingerprintOf, fromSchedulingRow, isValidAlgo, makeUuid,
-  schedulingValues, toSchedulingRow,
+  CardBrief, DDL, DayStat, DeckRow, LogPoint, MIGRATE_FLATTEN_DECKS, ReviewCardRow,
+  ReviewedCard, SQL_AHEAD_CARDS, SQL_AHEAD_CARDS_IN_DECK, SQL_COUNT_CARDS,
+  SQL_COUNT_CARDS_IN_DECK, SQL_COUNT_DUE, SQL_COUNT_NEW, SQL_DAY_STATS, SQL_DECK_NOTE_COUNT,
+  SQL_DELETE_DECK, SQL_DELETE_DECK_CARDS, SQL_DELETE_DECK_LOGS, SQL_DELETE_DECK_NOTES,
+  SQL_DELETE_DECK_SCHED, SQL_DELETE_NOTE, SQL_DELETE_NOTE_CARDS, SQL_DELETE_NOTE_LOGS,
+  SQL_DELETE_NOTE_SCHED, SQL_DUE_CARDS, SQL_DUE_CARDS_IN_DECK, SQL_DUE_FORECAST,
+  SQL_DUE_FORECAST_IN_DECK, SQL_HAS_PARENT_COL, SQL_INSERT_CARD, SQL_INSERT_DECK,
+  SQL_INSERT_LOG, SQL_INSERT_NOTE, SQL_LIST_CARDS_ALL, SQL_LIST_CARDS_IN_DECK, SQL_LIST_DECKS,
+  SQL_LOG_SINCE, SQL_NEW_CARDS, SQL_NEW_CARDS_IN_DECK, SQL_NEW_INTRODUCED_TODAY,
+  SQL_RETENTION_ALL, SQL_REVIEWED_TODAY, SQL_SELECT_DECK_ID, SQL_SELECT_DECK_NAME,
+  SQL_SELECT_NOTE_BY_CARD, SQL_SELECT_SCHEDULING, SQL_STABILITY_HISTOGRAM,
+  SQL_STABILITY_IN_DECK, SQL_TODAY_PROGRESS, SQL_UNLEARNED_COUNT, SQL_UNTOUCHED_DUE,
+  SQL_UPDATE_NOTE_TEXT, SQL_UPSERT_SCHEDULING, SchedulingRow, TodayProgress, fingerprintOf,
+  fromSchedulingRow, isValidAlgo, makeUuid, schedulingValues, toSchedulingRow,
 } from './Schema';
+import { ParsedCard } from './Quizify';
 
 const DOMAIN: number = 0x0A01;
 const TAG: string = 'REPS-DB';
@@ -43,7 +49,44 @@ export class Database {
     for (const stmt of DDL) {
       await this.store.executeSql(stmt);
     }
+    await this.flattenDecksIfNeeded();
     hilog.info(DOMAIN, TAG, '数据库就绪,已执行 %{public}d 条 DDL', DDL.length);
+  }
+
+  /**
+   * 一次性迁移:把带层级的 decks 拍平。
+   *
+   * 必须有这一步,因为 DDL 用的是 `CREATE TABLE IF NOT EXISTS` ——
+   * 光把建表语句改成新结构,对**已经存在**的表没有任何作用。
+   *
+   * 包在事务里:中间是 DROP TABLE decks 再 RENAME,崩在中途会把卡组全丢掉。
+   * 判据是「decks 还有没有 parent_id 列」,所以重复启动不会再跑第二次。
+   */
+  private async flattenDecksIfNeeded(): Promise<void> {
+    const store = this.db();
+    const rs = await store.querySql(SQL_HAS_PARENT_COL);
+    let hasParent = false;
+    try {
+      hasParent = rs.goToFirstRow() && rs.getLong(rs.getColumnIndex('n')) > 0;
+    } finally {
+      rs.close();
+    }
+    if (!hasParent) {
+      return;
+    }
+    hilog.info(DOMAIN, TAG, '检测到旧版分层卡组,开始拍平迁移');
+    store.beginTransaction();
+    try {
+      for (const stmt of MIGRATE_FLATTEN_DECKS) {
+        await store.executeSql(stmt);
+      }
+      store.commit();
+      hilog.info(DOMAIN, TAG, '卡组已拍平');
+    } catch (e) {
+      store.rollBack();
+      hilog.error(DOMAIN, TAG, '拍平迁移失败,已回滚: %{public}s', `${e}`);
+      throw new Error(`卡组拍平迁移失败: ${e}`);
+    }
   }
 
   private db(): relationalStore.RdbStore {
@@ -125,10 +168,10 @@ export class Database {
 
   // ------------------------------------------------------------ 写入卡组/笔记/卡片
 
-  /** 取得卡组 id,不存在则创建 */
-  ensureDeck(name: string, parentId: number): number {
-    this.db().executeSync(SQL_INSERT_DECK, [name, parentId] as Array<relationalStore.ValueType>);
-    const rs = this.db().querySqlSync(SQL_SELECT_DECK_ID, [name, parentId]);
+  /** 取得卡组 id,不存在则创建。卡组是平的,所以只按名字认 */
+  ensureDeck(name: string): number {
+    this.db().executeSync(SQL_INSERT_DECK, [name] as Array<relationalStore.ValueType>);
+    const rs = this.db().querySqlSync(SQL_SELECT_DECK_ID, [name]);
     try {
       if (!rs.goToFirstRow()) {
         throw new Error(`卡组创建失败: ${name}`);
@@ -209,6 +252,10 @@ export class Database {
     return this.scalar(SQL_COUNT_NEW, []);
   }
 
+  /**
+   * 取一个单值。**查询的列必须别名为 `n`** —— 这里是按名字取列的。
+   * 用别的别名不会编译报错,只会在运行时抛「column index is out of bounds」。
+   */
   private scalar(sql: string, args: Array<relationalStore.ValueType>): number {
     const rs = this.db().querySqlSync(sql, args);
     try {
@@ -228,6 +275,11 @@ export class Database {
     } finally {
       rs.close();
     }
+  }
+
+  /** 某个卡组里的卡片总数 —— 「开始学习」按钮只在这个数为 0 时才禁用 */
+  cardCountInDeck(deckId: number): number {
+    return this.scalar(SQL_COUNT_CARDS_IN_DECK, [deckId] as Array<relationalStore.ValueType>);
   }
 
   cardCount(): number {
@@ -251,7 +303,6 @@ export class Database {
         out.push({
           id: rs.getLong(rs.getColumnIndex('id')),
           name: rs.getString(rs.getColumnIndex('name')),
-          parentId: rs.getLong(rs.getColumnIndex('parent_id')),
           cards: rs.getLong(rs.getColumnIndex('cards')),
           due: rs.getLong(rs.getColumnIndex('due')),
           fresh: rs.getLong(rs.getColumnIndex('fresh')),
@@ -263,23 +314,14 @@ export class Database {
     return out;
   }
 
-  /** 卡组的完整路径,如 `Math_880 > Chapter_2`。最多向上找 8 层,防环 */
-  deckPath(deckId: number): string {
-    const parts: string[] = [];
-    let id = deckId;
-    for (let i = 0; i < 8 && id > 0; i++) {
-      const rs = this.db().querySqlSync(SQL_SELECT_DECK_PARENT, [id]);
-      try {
-        if (!rs.goToFirstRow()) {
-          break;
-        }
-        parts.unshift(rs.getString(rs.getColumnIndex('name')));
-        id = rs.getLong(rs.getColumnIndex('parent_id'));
-      } finally {
-        rs.close();
-      }
+  /** 卡组名。卡组是平的,不存在「路径」,一次查询即可 */
+  deckName(deckId: number): string {
+    const rs = this.db().querySqlSync(SQL_SELECT_DECK_NAME, [deckId]);
+    try {
+      return rs.goToFirstRow() ? rs.getString(rs.getColumnIndex('name')) : '';
+    } finally {
+      rs.close();
     }
-    return parts.join(' > ');
   }
 
   /** 按卡组取到期卡;deckId 为 0 表示全部卡组 */
@@ -297,7 +339,103 @@ export class Database {
     return this.idColumn(this.db().querySqlSync(SQL_NEW_CARDS_IN_DECK, [deckId, limit]));
   }
 
+  /**
+   * 「学习更多」取卡:**还没到期但快到期**的卡,最早该复习的在前。
+   *
+   * `from` 通常是 now,`to` 是明天结束的那个日界 —— 于是拿到的就是
+   * 「今天和明天要复习的卡」。用 `due > from` 而不是 `>=`,是为了和正常
+   * 到期取卡不重叠:已经到期的卡由今日集合负责,这里只管提前的部分。
+   *
+   * deckId 传 0 表示全部卡组。
+   */
+  aheadCardIds(deckId: number, from: number, to: number, limit: number): number[] {
+    if (limit <= 0 || to <= from) {
+      return [];
+    }
+    const sql: string = deckId > 0 ? SQL_AHEAD_CARDS_IN_DECK : SQL_AHEAD_CARDS;
+    const args: Array<relationalStore.ValueType> = deckId > 0
+      ? [deckId, from, to, limit] as Array<relationalStore.ValueType>
+      : [from, to, limit] as Array<relationalStore.ValueType>;
+    const rs = this.db().querySqlSync(sql, args);
+    const out: number[] = [];
+    try {
+      while (rs.goToNextRow()) {
+        out.push(rs.getLong(rs.getColumnIndex('card_id')));
+      }
+    } finally {
+      rs.close();
+    }
+    return out;
+  }
+
+  /**
+   * 今日进度三段条的数据。
+   *
+   * `untouched` 由调用方把「还没做的到期卡 + 剩余新卡额度」加进来 ——
+   * 那两个数已经有各自的口径(受复习上限、新卡额度约束),不该在这里重算一遍
+   * 而产生第二套事实。
+   */
+  todayProgress(deckId: number, dayFrom: number, dayTo: number, untouched: number): TodayProgress {
+    const rs = this.db().querySqlSync(SQL_TODAY_PROGRESS,
+      [dayTo, dayTo, dayFrom, deckId, deckId] as Array<relationalStore.ValueType>);
+    let settled = 0;
+    let again = 0;
+    try {
+      if (rs.goToFirstRow()) {
+        settled = rs.getLong(rs.getColumnIndex('settled'));
+        again = rs.getLong(rs.getColumnIndex('again'));
+      }
+    } finally {
+      rs.close();
+    }
+    return { settled: settled, again: again, untouched: untouched < 0 ? 0 : untouched };
+  }
+
+  /** 今日集合里今天还没答过的旧卡数 */
+  untouchedDueCount(deckId: number, dayTo: number, dayFrom: number, limit: number): number {
+    return this.scalar(SQL_UNTOUCHED_DUE,
+      [dayTo, dayFrom, deckId, deckId, limit] as Array<relationalStore.ValueType>);
+  }
+
+  /** 还没学过的卡有多少张(最多数到 limit) */
+  unlearnedCount(deckId: number, limit: number): number {
+    return this.scalar(SQL_UNLEARNED_COUNT,
+      [deckId, deckId, limit] as Array<relationalStore.ValueType>);
+  }
+
+  /** 今天已经引入了多少张新卡。剩余新卡额度 = 额度 − 这个数 */
+  newIntroducedToday(deckId: number, dayFrom: number): number {
+    return this.scalar(SQL_NEW_INTRODUCED_TODAY,
+      [dayFrom, deckId, deckId] as Array<relationalStore.ValueType>);
+  }
+
+  /** 今天答过的卡,最近的在前。一张卡答了多次也只出现一次 */
+  reviewedToday(deckId: number, dayFrom: number, limit: number): ReviewedCard[] {
+    const rs = this.db().querySqlSync(SQL_REVIEWED_TODAY,
+      [dayFrom, dayFrom, deckId, deckId, dayFrom, limit] as Array<relationalStore.ValueType>);
+    const out: ReviewedCard[] = [];
+    try {
+      while (rs.goToNextRow()) {
+        out.push({
+          cardId: rs.getLong(rs.getColumnIndex('card_id')),
+          title: rs.getString(rs.getColumnIndex('title')),
+          front: rs.getString(rs.getColumnIndex('front')),
+          grade: rs.getLong(rs.getColumnIndex('grade')),
+          lastTs: rs.getLong(rs.getColumnIndex('last_ts')),
+        });
+      }
+    } finally {
+      rs.close();
+    }
+    return out;
+  }
+
   /** 删除一个卡组连同它的全部内容。顺序必须从子表往父表删 */
+  /**
+   * 删一个卡组连同它的笔记、卡片、排期与流水。
+   * 卡组是平的,所以没有「级联到子卡组」这回事,也没有空父节点要收拾。
+   * 不可撤销,调用方必须先确认。
+   */
   deleteDeck(deckId: number): void {
     const d = this.db();
     d.executeSync(SQL_DELETE_DECK_LOGS, [deckId] as Array<relationalStore.ValueType>);
@@ -305,6 +443,85 @@ export class Database {
     d.executeSync(SQL_DELETE_DECK_CARDS, [deckId] as Array<relationalStore.ValueType>);
     d.executeSync(SQL_DELETE_DECK_NOTES, [deckId] as Array<relationalStore.ValueType>);
     d.executeSync(SQL_DELETE_DECK, [deckId] as Array<relationalStore.ValueType>);
+  }
+
+  /**
+   * 清空一个卡组的学习进度:**删排期和复习流水,卡片本身一张不动。**
+   *
+   * 清完之后这一组的卡全部变回「新卡」 —— 因为「是不是新卡」看的就是
+   * 有没有 scheduling 行。热力图里属于这一组的历史也会一起消失,
+   * 那是有意的:留着会让统计和实际进度对不上。
+   *
+   * 这是**不可撤销**的操作,调用方必须先让用户确认。
+   */
+  clearDeckProgress(deckId: number): void {
+    const d = this.db();
+    const a: Array<relationalStore.ValueType> = [deckId] as Array<relationalStore.ValueType>;
+    d.executeSync(SQL_DELETE_DECK_LOGS, a);
+    d.executeSync(SQL_DELETE_DECK_SCHED, a);
+  }
+
+  // ------------------------------------------------------------ 卡组浏览与手工编辑
+
+  /**
+   * 列出卡片。`deckId` 传 0 表示「全部卡组」。
+   * 没学过的卡没有 scheduling 行,所以查询用 LEFT JOIN,这里 due/reps 会是 0。
+   */
+  listCards(deckId: number): CardBrief[] {
+    const sql: string = deckId > 0 ? SQL_LIST_CARDS_IN_DECK : SQL_LIST_CARDS_ALL;
+    const args: Array<relationalStore.ValueType> = deckId > 0
+      ? [deckId] as Array<relationalStore.ValueType> : [] as Array<relationalStore.ValueType>;
+    const rs = this.db().querySqlSync(sql, args);
+    const out: CardBrief[] = [];
+    try {
+      while (rs.goToNextRow()) {
+        out.push({
+          cardId: rs.getLong(rs.getColumnIndex('card_id')),
+          noteId: rs.getLong(rs.getColumnIndex('note_id')),
+          type: rs.getLong(rs.getColumnIndex('type')),
+          title: rs.getString(rs.getColumnIndex('title')),
+          front: rs.getString(rs.getColumnIndex('front')),
+          back: rs.getString(rs.getColumnIndex('back')),
+          due: rs.getLong(rs.getColumnIndex('due')),
+          reps: rs.getLong(rs.getColumnIndex('reps')),
+        });
+      }
+    } finally {
+      rs.close();
+    }
+    return out;
+  }
+
+  /**
+   * 手工新建一张卡。题型 / 标题 / 选项 / 答案由调用方先用 Quizify 那条路解析出来
+   * (见 Quizify.parseOneCard),所以手工卡与导入卡的形状完全一致。
+   * 返回新卡的 card id。
+   */
+  insertManualCard(deckId: number, deckName: string, c: ParsedCard, now: number): number {
+    const ids: number[] = this.insertNote(deckId, deckName, c.type, c.front, c.back,
+      c.title, c.key, c.options, c.answer, '手工添加', 1, now);
+    return ids.length > 0 ? ids[0] : 0;
+  }
+
+  /**
+   * 改写一条笔记的正反面。**指纹不动** —— 内容变了但这还是同一张卡,
+   * 排期与历史都该留着;改指纹会让下次重导把它当成新卡。
+   */
+  updateNoteText(noteId: number, c: ParsedCard, now: number): void {
+    this.db().executeSync(SQL_UPDATE_NOTE_TEXT, [
+      c.type as number, c.front, c.back, c.title, c.options.join('\n'), c.answer,
+      now, noteId,
+    ] as Array<relationalStore.ValueType>);
+  }
+
+  /** 删一条笔记连同它的卡、排期与流水。本库没开外键级联,顺序必须子表在前 */
+  deleteNote(noteId: number): void {
+    const d = this.db();
+    const a: Array<relationalStore.ValueType> = [noteId] as Array<relationalStore.ValueType>;
+    d.executeSync(SQL_DELETE_NOTE_LOGS, a);
+    d.executeSync(SQL_DELETE_NOTE_SCHED, a);
+    d.executeSync(SQL_DELETE_NOTE_CARDS, a);
+    d.executeSync(SQL_DELETE_NOTE, a);
   }
 
   // ------------------------------------------------------------ 统计
@@ -323,6 +540,73 @@ export class Database {
           grade: rs.getLong(iGrade),
           cardId: rs.getLong(iCard),
         });
+      }
+    } finally {
+      rs.close();
+    }
+    return out;
+  }
+
+  /**
+   * 按天汇总的全部历史。anchor 必须由 Schema 的日界口径算出来
+   * (见 dayAnchor()),这样返回的 day 与 dayIndex() 同义。
+   */
+  dayStats(anchor: number): DayStat[] {
+    const rs = this.db().querySqlSync(SQL_DAY_STATS, [anchor]);
+    const out: DayStat[] = [];
+    try {
+      const iDay = rs.getColumnIndex('day');
+      const iReps = rs.getColumnIndex('reps');
+      const iMs = rs.getColumnIndex('ms');
+      while (rs.goToNextRow()) {
+        out.push({ day: rs.getLong(iDay), reps: rs.getLong(iReps), ms: rs.getLong(iMs) });
+      }
+    } finally {
+      rs.close();
+    }
+    return out;
+  }
+
+  /** 全量保持率。口径与 Schema.retentionOf() 相同,桌面测试盯住两者一致 */
+  retentionAll(): number {
+    const rs = this.db().querySqlSync(SQL_RETENTION_ALL);
+    let total = 0;
+    let good = 0;
+    try {
+      if (rs.goToNextRow()) {
+        total = rs.getLong(rs.getColumnIndex('total'));
+        good = rs.getLong(rs.getColumnIndex('good'));
+      }
+    } finally {
+      rs.close();
+    }
+    return total === 0 ? 0 : good / total;
+  }
+
+  /** 未来 from~to 之间的到期时刻,限定卡组(0 = 不限) */
+  dueForecastInDeck(deckId: number, from: number, to: number): number[] {
+    const rs = this.db().querySqlSync(SQL_DUE_FORECAST_IN_DECK,
+      [from, to, deckId, deckId]);
+    const out: number[] = [];
+    try {
+      const i = rs.getColumnIndex('due');
+      while (rs.goToNextRow()) {
+        out.push(rs.getLong(i));
+      }
+    } finally {
+      rs.close();
+    }
+    return out;
+  }
+
+  /** 卡片稳定性,限定卡组(0 = 不限)。没答过的卡以 0 出现 */
+  stabilitiesInDeck(deckId: number): number[] {
+    const rs = this.db().querySqlSync(SQL_STABILITY_IN_DECK, [deckId, deckId]);
+    const out: number[] = [];
+    try {
+      const i = rs.getColumnIndex('stability');
+      while (rs.goToNextRow()) {
+        out.push(rs.getDouble(i));
       }
     } finally {
       rs.close();

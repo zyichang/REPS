@@ -23,7 +23,14 @@ build.log
 /devtest/Models.ts
 /devtest/Quizify.ts
 /devtest/Schema.ts
+/devtest/Inline.ts
+/devtest/Yaml.ts
+/devtest/Steps.ts
 
 # 系统垃圾
 .DS_Store
 Thumbs.db
+
+# Kiro 的会话导出文件。不是源码,而且会长到几十 MB。
+REPS.json
+*.kiro-session.json

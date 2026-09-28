@@ -67,11 +67,20 @@ export function dayStart(day: number): number {
  *  - uuid / updated_at 是为将来同步预留的,现阶段只写不用。
  */
 export const DDL: string[] = [
+  /*
+   * 卡组是**平的**:一本书一个卡组,没有层级。
+   *
+   * 早先这里有 parent_id,用来表达导入格式里的 `A::B`。实际用起来一本书就是
+   * 一本书,层级只带来麻烦:父节点挂 0 张卡、在列表里被 `HAVING cards > 0`
+   * 过滤掉、于是「选不中也删不掉」,而按卡组过滤又是精确匹配、不含子树,
+   * 导致按章节导入之后**没法整本一起学**。整套概念删掉了。
+   *
+   * 旧库靠 Database.init() 里的拍平迁移升上来 —— `CREATE TABLE IF NOT EXISTS`
+   * 不会改已存在的表,光改这里对老库没有任何作用。
+   */
   `CREATE TABLE IF NOT EXISTS decks (
-     id        INTEGER PRIMARY KEY AUTOINCREMENT,
-     name      TEXT    NOT NULL,
-     parent_id INTEGER NOT NULL DEFAULT 0,
-     UNIQUE(name, parent_id)
+     id   INTEGER PRIMARY KEY AUTOINCREMENT,
+     name TEXT    NOT NULL UNIQUE
    )`,
 
   `CREATE TABLE IF NOT EXISTS notes (
@@ -258,12 +267,48 @@ export const SQL_NEW_CARDS: string =
 
 // ---------------------------------------------------------------- 写入卡组/笔记/卡片
 
-/** 卡组按 (name, parent_id) 唯一,重复导入同名卡组时直接忽略 */
+/** 卡组按 name 唯一,重复导入同名卡组时直接忽略 */
+/**
+ * 老库检测:decks 还有没有 parent_id 这一列。列名必须叫 n(见 scalar)。
+ */
+export const SQL_HAS_PARENT_COL: string =
+  `SELECT COUNT(*) AS n FROM pragma_table_info('decks') WHERE name = 'parent_id'`;
+
+/**
+ * 把带层级的 decks 拍平。**按顺序执行,外面要包事务。**
+ *
+ * 几个必须这么写的地方:
+ *   - 新表**保留原来的 id**。notes.deck_id 指向它,换 id 就全体悬空。
+ *   - 只搬「真的挂了笔记」的卡组。纯层级容器(父节点)本来就是 0 张卡,
+ *     列表里被 HAVING 过滤掉、用户既看不见也删不掉,正好趁这次清掉。
+ *     因为只丢没有笔记的卡组,不会有笔记变成孤儿。
+ *   - 重名要兜底。`数学::高数` 和 `物理::高数` 拍平后都叫「高数」,
+ *     而新表 name 是 UNIQUE,不处理会直接迁移失败。撞了就加 id 后缀。
+ */
+export const MIGRATE_FLATTEN_DECKS: string[] = [
+  `CREATE TABLE IF NOT EXISTS decks_flat (
+     id   INTEGER PRIMARY KEY AUTOINCREMENT,
+     name TEXT    NOT NULL UNIQUE
+   )`,
+  `INSERT INTO decks_flat (id, name)
+   SELECT d.id,
+          CASE WHEN EXISTS (
+                 SELECT 1 FROM decks o
+                  WHERE o.name = d.name AND o.id <> d.id
+                    AND EXISTS (SELECT 1 FROM notes n2 WHERE n2.deck_id = o.id))
+               THEN d.name || ' (' || d.id || ')'
+               ELSE d.name END
+     FROM decks d
+    WHERE EXISTS (SELECT 1 FROM notes n WHERE n.deck_id = d.id)`,
+  `DROP TABLE decks`,
+  `ALTER TABLE decks_flat RENAME TO decks`,
+];
+
 export const SQL_INSERT_DECK: string =
-  `INSERT OR IGNORE INTO decks (name, parent_id) VALUES (?, ?)`;
+  `INSERT OR IGNORE INTO decks (name) VALUES (?)`;
 
 export const SQL_SELECT_DECK_ID: string =
-  `SELECT id FROM decks WHERE name = ? AND parent_id = ?`;
+  `SELECT id FROM decks WHERE name = ?`;
 
 export const SQL_INSERT_NOTE: string =
   `INSERT INTO notes (deck_id, type, front, back, title, options, answer,
@@ -284,10 +329,17 @@ export const SQL_SELECT_NOTE_BY_CARD: string =
     WHERE c.id = ?`;
 
 /** 某卡组下的卡片总数,用于首页显示 */
+/**
+ * 某个卡组的卡片总数。
+ *
+ * **notes 的别名不能叫 n。** 输出列按 scalar() 的约定必须叫 `n`,
+ * 而这条语句原来把 notes 也别名成 n,两个 n 撞在一起 ——
+ * 这条查询在接进「开始学习」按钮之前一直是死代码,所以没人发现。
+ */
 export const SQL_COUNT_CARDS_IN_DECK: string =
   `SELECT COUNT(*) AS n FROM cards c
-     JOIN notes n ON n.id = c.note_id
-    WHERE n.deck_id = ?`;
+     JOIN notes nt ON nt.id = c.note_id
+    WHERE nt.deck_id = ?`;
 
 // ---------------------------------------------------------------- 卡组一览
 
@@ -301,7 +353,7 @@ export const SQL_COUNT_CARDS_IN_DECK: string =
  * A 只是层级容器,列出来会让用户看到一堆 0 卡的空组。
  */
 export const SQL_LIST_DECKS: string =
-  `SELECT d.id, d.name, d.parent_id,
+  `SELECT d.id, d.name,
           COUNT(c.id) AS cards,
           SUM(CASE WHEN s.card_id IS NOT NULL AND s.due <= ? THEN 1 ELSE 0 END) AS due,
           SUM(CASE WHEN s.card_id IS NULL THEN 1 ELSE 0 END) AS fresh
@@ -313,11 +365,124 @@ export const SQL_LIST_DECKS: string =
     HAVING cards > 0
     ORDER BY d.name ASC`;
 
-/** 卡组的完整路径靠 parent_id 逐级往上找 */
-export const SQL_SELECT_DECK_PARENT: string =
-  `SELECT id, name, parent_id FROM decks WHERE id = ?`;
+/** 卡组名。卡组是平的,所以「路径」就是名字本身,一次查询搞定 */
+export const SQL_SELECT_DECK_NAME: string =
+  `SELECT name FROM decks WHERE id = ?`;
 
 /** 按卡组取到期卡。deck_id = 0 时用 SQL_DUE_CARDS 取全部 */
+// ------------------------------------------------------------ 今日已学回顾
+
+/**
+ * 今天答过的卡,最近答的在前 —— 「回顾今日已学」用。
+ *
+ * 取 `review_log` 里今天的最后一条,所以一张卡今天答了三次也只出现一次,
+ * 并且带的是**最后一次**的评级。参数:今日起点、卡组(0 表示全部)、上限。
+ */
+export const SQL_REVIEWED_TODAY: string =
+  `SELECT c.id AS card_id, n.id AS note_id, n.type, n.title, n.front, n.back,
+          COALESCE(s.due, 0) AS due, COALESCE(s.reps, 0) AS reps,
+          (SELECT r.grade FROM review_log r
+            WHERE r.card_id = c.id AND r.ts >= ?
+            ORDER BY r.ts DESC LIMIT 1) AS grade,
+          (SELECT MAX(r.ts) FROM review_log r
+            WHERE r.card_id = c.id AND r.ts >= ?) AS last_ts
+     FROM cards c
+     JOIN notes n ON n.id = c.note_id
+     LEFT JOIN scheduling s ON s.card_id = c.id
+    WHERE (? = 0 OR n.deck_id = ?)
+      AND EXISTS (SELECT 1 FROM review_log r WHERE r.card_id = c.id AND r.ts >= ?)
+    ORDER BY last_ts DESC
+    LIMIT ?`;
+
+// ------------------------------------------------------------ 今日集合的白色部分
+
+/**
+ * 今日集合里**今天还没答过**的旧卡数(三段条的白色部分之一)。
+ *
+ * 关键是 `s.last_review < ?`(今日起点)。早先这里用的是「当前到期」,
+ * 于是一张答错的卡进了灰条,一分钟后又满足「当前到期」而被同时算进白条 ——
+ * 结果灰条在涨、白条不降、总数还在飘。排除今天答过的卡,三色才是同一批卡的划分。
+ *
+ * 用 `due < 今日截止` 而不是 `due <= now`:下午才到期的卡也属于今天这一组,
+ * 只是还轮不到它。这样一整天里总数是稳定的。
+ *
+ * 参数:今日截止、今日起点、卡组、卡组、复习上限。列名必须叫 n(见 scalar)。
+ */
+export const SQL_UNTOUCHED_DUE: string =
+  `SELECT COUNT(*) AS n FROM (
+     SELECT c.id FROM cards c
+       JOIN notes nt ON nt.id = c.note_id
+       JOIN scheduling s ON s.card_id = c.id
+      WHERE s.due < ? AND s.last_review < ?
+        AND (? = 0 OR nt.deck_id = ?)
+      LIMIT ?)`;
+
+/** 还没学过的卡(没有排期行)有多少张。列名必须叫 n */
+export const SQL_UNLEARNED_COUNT: string =
+  `SELECT COUNT(*) AS n FROM (
+     SELECT c.id FROM cards c
+       JOIN notes nt ON nt.id = c.note_id
+       LEFT JOIN scheduling s ON s.card_id = c.id
+      WHERE s.card_id IS NULL AND (? = 0 OR nt.deck_id = ?)
+      LIMIT ?)`;
+
+/**
+ * 今天已经引入过的新卡数 —— 用 `first_seen` 判定。
+ * 有了它,「每日新卡额度」才真的是**每天**的:剩余额度 = 额度 − 今天已引入。
+ * 早先没有这个数,做完 20 张再开一轮又会给 20 张。
+ */
+export const SQL_NEW_INTRODUCED_TODAY: string =
+  `SELECT COUNT(*) AS n FROM scheduling s
+     JOIN cards c ON c.id = s.card_id
+     JOIN notes nt ON nt.id = c.note_id
+    WHERE s.first_seen >= ? AND (? = 0 OR nt.deck_id = ?)`;
+
+// ------------------------------------------------------------ 今日进度三段条
+
+/**
+ * 今天答过的卡,按「今天还会不会再出现」分两段。
+ *
+ * 这是 WordSnap 的教训:按「上次答对没有」分段会骗人 —— 新卡答对之后还在
+ * 10 分钟的学习步进里,今天还会回来,却被显示成「完成了」。
+ * 所以分段依据是**下次到期时刻和今日截止的关系**,不是成绩。
+ *
+ * 参数顺序:今日截止、今日截止、今日起点、卡组、卡组 —— 全用无编号的 `?`。
+ * **不要用 `?1`/`?2` 这种编号占位符**:node:sqlite 的桌面测试会直接报
+ * 「column index out of range」,两个驱动对编号参数的处理并不一致。
+ * 宁可把同一个值传两遍。
+ */
+export const SQL_TODAY_PROGRESS: string =
+  `SELECT
+     SUM(CASE WHEN s.due >= ? THEN 1 ELSE 0 END) AS settled,
+     SUM(CASE WHEN s.due <  ? THEN 1 ELSE 0 END) AS again
+   FROM scheduling s
+   JOIN cards c ON c.id = s.card_id
+   JOIN notes n ON n.id = c.note_id
+   WHERE s.last_review >= ?
+     AND (? = 0 OR n.deck_id = ?)`;
+
+// ------------------------------------------------------------ 提前复习(学习更多)
+
+/**
+ * 「学习更多」要的卡:**还没到期,但快到期了**。
+ *
+ * `due > ?`(不是 >=)—— 已经到期的卡本来就在今日集合里,由正常流程出;
+ * 这里只负责把未来的卡提前拿上来,两边不重叠。
+ * 按 due 升序:最快该复习的先来,这样提前复习的收益最大、打扰最小。
+ */
+export const SQL_AHEAD_CARDS: string =
+  `SELECT s.card_id FROM scheduling s
+    WHERE s.due > ? AND s.due < ?
+    ORDER BY s.due ASC LIMIT ?`;
+
+export const SQL_AHEAD_CARDS_IN_DECK: string =
+  `SELECT c.id AS card_id
+     FROM cards c
+     JOIN notes n ON n.id = c.note_id
+     JOIN scheduling s ON s.card_id = c.id
+    WHERE n.deck_id = ? AND s.due > ? AND s.due < ?
+    ORDER BY s.due ASC LIMIT ?`;
+
 export const SQL_DUE_CARDS_IN_DECK: string =
   `SELECT c.id AS card_id
      FROM cards c
@@ -345,6 +510,54 @@ export const SQL_DELETE_DECK_CARDS: string =
   `DELETE FROM cards WHERE note_id IN (SELECT id FROM notes WHERE deck_id = ?)`;
 export const SQL_DELETE_DECK_NOTES: string = `DELETE FROM notes WHERE deck_id = ?`;
 export const SQL_DELETE_DECK: string = `DELETE FROM decks WHERE id = ?`;
+
+/**
+ * 这个卡组下还剩几条笔记。
+ * **列名必须叫 n** —— Database.scalar() 是按 `n` 取列的,换个别名就会
+ * 报「column index is out of bounds」,而且报在运行时,编译期看不出来。
+ */
+export const SQL_DECK_NOTE_COUNT: string = `SELECT COUNT(*) AS n FROM notes WHERE deck_id = ?`;
+
+// ------------------------------------------------------------ 卡组浏览与手工编辑
+
+/**
+ * 列出一个卡组里的卡片。`scheduling` 用 LEFT JOIN —— 没学过的卡没有排期行,
+ * INNER JOIN 会把它们整批漏掉。
+ */
+export const SQL_LIST_CARDS_IN_DECK: string =
+  `SELECT c.id AS card_id, n.id AS note_id, n.type, n.title, n.front, n.back,
+          COALESCE(s.due, 0) AS due, COALESCE(s.reps, 0) AS reps
+     FROM cards c
+     JOIN notes n ON n.id = c.note_id
+     LEFT JOIN scheduling s ON s.card_id = c.id
+    WHERE n.deck_id = ?
+    ORDER BY n.id, c.ordinal`;
+
+/** 同上,但跨全部卡组 —— 「浏览全部卡片」用 */
+export const SQL_LIST_CARDS_ALL: string =
+  `SELECT c.id AS card_id, n.id AS note_id, n.type, n.title, n.front, n.back,
+          COALESCE(s.due, 0) AS due, COALESCE(s.reps, 0) AS reps
+     FROM cards c
+     JOIN notes n ON n.id = c.note_id
+     LEFT JOIN scheduling s ON s.card_id = c.id
+    ORDER BY n.deck_id, n.id, c.ordinal`;
+
+/**
+ * 改写一条笔记的正反面。题型 / 标题 / 选项 / 答案都要一起更新 ——
+ * 用户把 `;;;` 删掉之后,这张卡就不该再是选择题了。
+ * 指纹不动:那是「还是那张卡」的身份,内容改了身份不变,否则重导会变成新卡。
+ */
+export const SQL_UPDATE_NOTE_TEXT: string =
+  `UPDATE notes SET type = ?, front = ?, back = ?, title = ?, options = ?, answer = ?,
+          updated_at = ? WHERE id = ?`;
+
+/** 删一条笔记要先删子表 —— 本库没有开外键级联 */
+export const SQL_DELETE_NOTE_LOGS: string =
+  `DELETE FROM review_log WHERE card_id IN (SELECT id FROM cards WHERE note_id = ?)`;
+export const SQL_DELETE_NOTE_SCHED: string =
+  `DELETE FROM scheduling WHERE card_id IN (SELECT id FROM cards WHERE note_id = ?)`;
+export const SQL_DELETE_NOTE_CARDS: string = `DELETE FROM cards WHERE note_id = ?`;
+export const SQL_DELETE_NOTE: string = `DELETE FROM notes WHERE id = ?`;
 
 // ---------------------------------------------------------------- 统计
 
@@ -376,6 +589,87 @@ export const SQL_STABILITY_HISTOGRAM: string =
   `SELECT COALESCE(s.stability, 0) AS stability
      FROM cards c LEFT JOIN scheduling s ON s.card_id = c.id`;
 
+/** 按天汇总的一行 */
+export interface DayStat {
+  /** 与 dayIndex() 同义的天序号 */
+  day: number;
+  /** 这天作答多少次 */
+  reps: number;
+  /** 这天累计花了多少毫秒 */
+  ms: number;
+}
+
+/**
+ * SQL_DAY_STATS 要用的锚点:时区偏移 + 凌晨分界。
+ * 把它单独拎出来,是为了让 SQL 里的 day 和 dayIndex() 共用同一个定义。
+ */
+export function dayAnchor(now: number): number {
+  const d = new Date(now);
+  return d.getTimezoneOffset() * MIN_MS + DAY_CUTOFF_MS;
+}
+
+/**
+ * 按天汇总的全部历史:每天作答多少次、花了多少毫秒。
+ *
+ * 为什么不在 TS 里分桶:总作答、学习天数、连续天数都要**全量**口径,
+ * 全量分桶就得把整张 review_log 读进内存。按天聚合之后一天只回一行,
+ * 十年也就三千多行。
+ *
+ * **日界口径不在这条 SQL 里重新定义。** `?` 收的是 TS 算好的锚点
+ * (时区偏移 + 凌晨分界),SQL 只做一次减法和除法,所以 day 的含义与
+ * dayIndex() 完全一致 —— 两处各写一套日界逻辑迟早会对不上。
+ *
+ * 整数除法在 SQLite 里是向零截断、不是向下取整,但 ts 减锚点后恒为正
+ * (epoch 毫秒 ~1.7e12),截断与取整等价。
+ */
+export const SQL_DAY_STATS: string =
+  `SELECT CAST((ts - ?) / 86400000 AS INTEGER) AS day,
+          COUNT(*) AS reps,
+          SUM(cost_ms) AS ms
+     FROM review_log
+    GROUP BY day
+    ORDER BY day ASC`;
+
+/**
+ * 全量保持率:答对(评级 >= 良好)占**除首答以外**全部作答的比例。
+ *
+ * 排除每张卡的第一次作答,和 retentionOf() 是同一条规则 ——
+ * 新卡首答必然「不会」,算进去只会让保持率恒偏低。
+ *
+ * 用 MIN(id) 而不是 MIN(ts) 找首答:同一毫秒内的两条流水 ts 会相等,
+ * 按 ts 比较会把它们**一起**排除掉。id 自增,不会撞。
+ */
+export const SQL_RETENTION_ALL: string =
+  `SELECT COUNT(*) AS total,
+          SUM(CASE WHEN grade >= 2 THEN 1 ELSE 0 END) AS good
+     FROM review_log r
+    WHERE r.id > (SELECT MIN(r2.id) FROM review_log r2 WHERE r2.card_id = r.card_id)`;
+
+/**
+ * 未来到期量预测,限定卡组。deckId 传 0 表示不限。
+ * 过滤写法与学习页一致(精确匹配 deck_id,不含子卡组),
+ * 这样统计页和学习页给出的数字不会互相打脸。
+ */
+export const SQL_DUE_FORECAST_IN_DECK: string =
+  `SELECT s.due AS due
+     FROM scheduling s
+     JOIN cards c ON c.id = s.card_id
+     JOIN notes n ON n.id = c.note_id
+    WHERE s.due > ? AND s.due <= ? AND (? = 0 OR n.deck_id = ?)
+    ORDER BY s.due ASC`;
+
+/**
+ * 稳定性分布,限定卡组。deckId 传 0 表示不限。
+ * 和 SQL_STABILITY_HISTOGRAM 一样**从 cards 出发 LEFT JOIN**,
+ * 否则没答过的卡会整批消失,「未学」永远是 0。
+ */
+export const SQL_STABILITY_IN_DECK: string =
+  `SELECT COALESCE(s.stability, 0) AS stability
+     FROM cards c
+     JOIN notes n ON n.id = c.note_id
+     LEFT JOIN scheduling s ON s.card_id = c.id
+    WHERE (? = 0 OR n.deck_id = ?)`;
+
 /** 按指纹找已有笔记(Task 7 幂等重导用) */
 export const SQL_SELECT_NOTE_BY_FINGERPRINT: string =
   `SELECT id FROM notes WHERE fingerprint = ?`;
@@ -393,10 +687,45 @@ export const SQL_COUNT_NEW: string =
 export interface DeckRow {
   id: number;
   name: string;
-  parentId: number;
   cards: number;
   due: number;
   fresh: number;
+}
+
+/**
+ * 卡组浏览列表的一行。front / back 是原文,截断交给界面 ——
+ * 数据层不做展示决定。
+ */
+/**
+ * 今日进度的三段。三个数加起来就是「今天这一组有多大」。
+ * settled 绿 —— 今天不会再出现;again 灰 —— 今天还会回来;untouched 白 —— 还没碰过。
+ */
+export interface TodayProgress {
+  settled: number;
+  again: number;
+  untouched: number;
+}
+
+/** 今日已学的一张卡。grade 是今天最后一次的评级 */
+export interface ReviewedCard {
+  cardId: number;
+  title: string;
+  front: string;
+  grade: number;
+  lastTs: number;
+}
+
+export interface CardBrief {
+  cardId: number;
+  noteId: number;
+  type: number;
+  title: string;
+  front: string;
+  back: string;
+  /** 下次到期毫秒。0 表示从没学过 */
+  due: number;
+  /** 复习次数。0 表示新卡 */
+  reps: number;
 }
 
 /** 一条复习流水,热力图与保持率都由它聚合 */

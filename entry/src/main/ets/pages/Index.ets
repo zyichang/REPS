@@ -11,8 +11,11 @@
 
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { appStore } from '../store/AppStore';
-import { DecksPage } from '../view/DecksPage';
+import {
+  SK_BACK_REQ, SK_CAN_BACK, SK_GOTO_TAB, SK_IMMERSIVE, SK_LANG, appStore,
+} from '../store/AppStore';
+import { L, LANG_ZH, fmt } from '../i18n/Strings';
+import { GlossaryPage } from '../view/GlossaryPage';
 import { ProfilePage } from '../view/ProfilePage';
 import { StatsPage } from '../view/StatsPage';
 import { StudyPage } from '../view/StudyPage';
@@ -20,7 +23,14 @@ import { StudyPage } from '../view/StudyPage';
 const DOMAIN: number = 0x0A01;
 const TAG: string = 'REPS-Index';
 
-const TAB_LABEL: string[] = ['学习', '统计', '卡组', '我的'];
+/**
+  * 标签文字改为跟着语言走。**不要把 L() 的结果传进 @Builder** ——
+  * 按值传参的 @Builder 不响应更新;在 tabItem 内部现取。
+  */
+function tabLabel(lang: string, i: number): string {
+  const d = L(lang);
+  return i === 0 ? d.tabStudy : i === 1 ? d.tabStats : i === 2 ? d.tabGlossary : d.tabMe;
+}
 const ACTIVE: string = '#2E9E63';
 const INACTIVE: string = '#B0B7C3';
 const ICON_BOX: number = 22;
@@ -29,8 +39,40 @@ const ICON_BOX: number = 22;
 @Component
 struct Index {
   @State private current: number = 0;
+  /** 别的页面请求翻页时写 SK_GOTO_TAB,这里接住。-1 表示没有待处理的请求 */
+  @StorageLink(SK_GOTO_TAB) @Watch('onGotoTab') gotoTab: number = -1;
+  /** 语言。从 AppStorage 读,这样切换时标签栏会重绘 */
+  @StorageLink(SK_LANG) lang: string = LANG_ZH;
+  /** 学习页进入卡片阶段时为真 —— 此时藏掉标签栏,给一个干净的作答界面 */
+  @StorageLink(SK_IMMERSIVE) immersive: boolean = false;
+  /** 当前页面是否还有上一级可回。由各标签页写入 */
+  @StorageLink(SK_CAN_BACK) canBack: boolean = false;
+  @StorageLink(SK_BACK_REQ) backReq: number = 0;
   @State private ready: boolean = false;
   @State private bootError: string = '';
+
+  /**
+   * 系统返回(含侧滑返回)。
+   *
+   * **默认行为是直接退出应用**,那在有内部层级的页面上是错的 ——
+   * 用户在「预览」里侧滑,期望回到卡片列表,而不是把应用关掉。
+   * 所以:当前页说自己还能返回,就拦下来发一个返回请求(返回 true);
+   * 已经在顶层了才交给系统(返回 false)。
+   */
+  onBackPress(): boolean {
+    if (this.canBack) {
+      this.backReq = this.backReq + 1;
+      return true;
+    }
+    return false;
+  }
+
+  onGotoTab(): void {
+    if (this.gotoTab >= 0) {
+      this.current = this.gotoTab;
+      this.gotoTab = -1;        // 消费掉,否则下次写同样的值不会触发 @Watch
+    }
+  }
 
   aboutToAppear(): void {
     this.boot();
@@ -43,7 +85,7 @@ struct Index {
       this.ready = true;
       hilog.info(DOMAIN, TAG, '主框架就绪');
     } catch (e) {
-      this.bootError = `启动失败: ${e}`;
+      this.bootError = fmt(L(this.lang).bootFailed, `${e}`);
       hilog.error(DOMAIN, TAG, '启动失败 %{public}s', String(e));
     }
   }
@@ -111,7 +153,14 @@ struct Index {
     .width(ICON_BOX).height(ICON_BOX)
   }
 
-  /** 标签项。只接常量下标 —— 文字与颜色都在内部算 */
+  /**
+   * 标签项。只接常量下标 —— 文字与颜色都在内部从 @State 算。
+   *
+   * 文字**只在选中时出现**。用 Visibility.Hidden 而不是 None:
+   * Hidden 仍然占位,所以切换标签时图标不会上下跳动;None 会让整行重新布局。
+   * 文字隐藏后无障碍读屏拿不到标签,因此把标签挂到整项的 accessibilityText 上,
+   * 无论选中与否都念得出来。
+   */
   @Builder
   tabItem(i: number) {
     Column({ space: 2 }) {
@@ -124,22 +173,32 @@ struct Index {
       } else {
         this.iconProfile(3)
       }
-      Text(TAB_LABEL[i])
+      Text(tabLabel(this.lang, i))
         .fontSize(10)
         .fontColor(this.tint(i))
+        .visibility(this.current === i ? Visibility.Visible : Visibility.Hidden)
     }
     .width('100%').height('100%').justifyContent(FlexAlign.Center)
+    .accessibilityText(tabLabel(this.lang, i))
+    .accessibilityLevel('yes')
   }
 
   build() {
     Column() {
       if (!this.ready) {
+        /*
+         * 启动画面接着系统启动窗走,所以底色要和 start_window_background 一致,
+         * 否则会闪一下白 —— 原来是默认白底 + 深灰字,改成绿底之后那行字几乎看不见。
+         */
         Column({ space: 8 }) {
-          Text('刻意重复').fontSize(26).fontWeight(FontWeight.Bold)
-          Text(this.bootError.length > 0 ? this.bootError : '正在打开数据库…')
-            .fontSize(13).fontColor(this.bootError.length > 0 ? '#E5544B' : '#8A8A8E')
+          Text(L(this.lang).appName)
+            .fontSize(26).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
+          Text(this.bootError.length > 0 ? this.bootError : L(this.lang).openingDb)
+            .fontSize(13)
+            .fontColor(this.bootError.length > 0 ? '#FFD9D6' : 'rgba(255,255,255,0.72)')
         }
         .width('100%').height('100%').justifyContent(FlexAlign.Center)
+        .backgroundColor('#227C50')
       } else {
         Tabs({ barPosition: BarPosition.End, index: this.current }) {
           TabContent() {
@@ -151,7 +210,7 @@ struct Index {
           }.tabBar(this.tabItem(1))
 
           TabContent() {
-            DecksPage()
+            GlossaryPage()
           }.tabBar(this.tabItem(2))
 
           TabContent() {
@@ -161,6 +220,11 @@ struct Index {
         .barHeight(58)
         .barMode(BarMode.Fixed)
         .onChange((index: number) => { this.current = index; })
+        .barHeight(this.immersive ? 0 : 56)
+        // **藏起标签栏不等于锁住手势。** Tabs 默认可以左右滑动切页,
+        // 作答中一划就跳走,计时和专注都被打断 —— 所以沉浸时把滑动也关掉。
+        .scrollable(!this.immersive)
+        .animationDuration(0)
         .width('100%')
         .height('100%')
       }

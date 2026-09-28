@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<link rel="stylesheet" href="katex.min.css">
+<script src="katex.min.js"></script>
+<style>
+  /* 只负责排版一段卡片文本。背景透明,由原生那边决定卡片底色。 */
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    -webkit-text-size-adjust: none;
+    /* 公式会溢出行框,不能裁 */
+    overflow: visible;
+  }
+  #root {
+    /* 上下留一点内边距 —— \dfrac / \int / \sqrt 会溢出行框,
+       给它们物理空间,比事后把上报高度调大可靠(调大会和视口互相喂养) */
+    padding: 6px 0;
+    /* 字号与行高由原生注入,保证和非公式卡片看起来是同一套排版 */
+    font-family: -apple-system, "HarmonyOS Sans SC", "Noto Sans CJK SC", sans-serif;
+    color: #1C1C1E;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+  b        { font-weight: 700; }
+  code     { font-family: ui-monospace, Menlo, Consolas, monospace; color: #B3261E; }
+  mark     { background: #FFF3C4; color: #8A5A00; }
+  .blank   { color: #2E9E63; letter-spacing: 1px; }
+  /* 解析失败的公式:显示原文而不是留白,并标出来 */
+  .mathbad { font-family: ui-monospace, monospace; color: #B3261E;
+             background: #FDECEA; border-radius: 3px; padding: 0 2px; }
+  .katex-display { margin: 0.5em 0; overflow-x: auto; overflow-y: hidden; }
+  /* ``` 代码块:等宽、深底、长行横向滚动而不折断 */
+  pre.code {
+    margin: 8px 0; padding: 10px 12px;
+    background: #F0F1F4; border-radius: 8px;
+    overflow-x: auto; white-space: pre;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.88em; line-height: 1.45;
+    color: #1C1C1E;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+(function () {
+  'use strict';
+
+  var root = document.getElementById('root');
+  /** 渲染自检:尝试了几个公式、几个退回原文。原生侧靠它确认 KaTeX 真的在工作 */
+  var stats = { attempted: 0, failed: 0 };
+  var lastMeasure = { rect: 0, scroll: 0, used: 0 };
+
+  function textNode(s) { return document.createTextNode(s); }
+
+  function wrap(tag, cls, s) {
+    var e = document.createElement(tag);
+    if (cls) { e.className = cls; }
+    e.appendChild(textNode(s));
+    return e;
+  }
+
+  /**
+   * 渲染一个数学片段。传进来的 text 含首尾的 $ 或 $$ —— 由原生那边的
+   * parseInline 切出来的,所以这里只剥符号,不做查找。
+   * 剥符号而不是让 KaTeX 自己扫全文,是为了避开「价格是 $100 元」那类误判:
+   * 那个判断原生解析器已经做过了,不重复做第二遍。
+   */
+  function mathElement(text) {
+    var display = false;
+    var body = text;
+    if (body.length >= 4 && body.slice(0, 2) === '$$' && body.slice(-2) === '$$') {
+      display = true;
+      body = body.slice(2, -2);
+    } else if (body.length >= 2 && body.charAt(0) === '$' && body.charAt(body.length - 1) === '$') {
+      body = body.slice(1, -1);
+    }
+    stats.attempted++;
+    try {
+      var span = document.createElement('span');
+      span.innerHTML = katex.renderToString(body, {
+        displayMode: display,
+        throwOnError: true,
+        strict: 'ignore',      // \leqslant 之类的 AMS 命令不该因为 strict 报错
+        trust: false           // 不允许 \href \includegraphics 等有副作用的命令
+      });
+      return span;
+    } catch (e) {
+      // 公式写错时显示原文并标红,而不是整张卡空白 —— 卡还是能复习的
+      stats.failed++;
+      return wrap('span', 'mathbad', text);
+    }
+  }
+
+  /** kind 与 ArkTS 侧的 InlineKind 一一对应 */
+  function spanElement(sp) {
+    switch (sp.k) {
+      case 1:  return wrap('b', null, sp.t);
+      case 2:  return wrap('mark', null, sp.t);
+      case 3:  return wrap('code', null, sp.t);
+      case 4:  return wrap('sup', null, sp.t);
+      case 5:  return wrap('sub', null, sp.t);
+      case 6:  return mathElement(sp.t);
+      default: return textNode(sp.t);
+    }
+  }
+
+  /**
+   * 原生调用入口。payload 形如
+   *   { fontPx: 17, lineHeightPx: 27, spans: [{t:'…', k:0}, …] }
+   * 换行按 \n 拆成 <br>,因为卡片正文是保留换行的纯文本。
+   */
+  window.renderCard = function (json) {
+    var data;
+    try {
+      data = JSON.parse(json);
+    } catch (e) {
+      root.textContent = '渲染参数解析失败';
+      reportHeight();
+      return;
+    }
+    root.style.fontSize = (data.fontPx || 16) + 'px';
+    root.style.lineHeight = (data.lineHeightPx || 26) + 'px';
+    root.textContent = '';
+    stats.attempted = 0;
+    stats.failed = 0;
+
+    var blocks = data.blocks || [];
+    for (var bi = 0; bi < blocks.length; bi++) {
+      var blk = blocks[bi];
+      if (blk.k === 'c') {
+        // 代码块整段原样放进 <pre>,不做任何行内处理
+        var pre = document.createElement('pre');
+        pre.className = 'code';
+        pre.appendChild(textNode(String(blk.t)));
+        root.appendChild(pre);
+        continue;
+      }
+      var para = document.createElement('div');
+      var spans = blk.spans || [];
+      for (var i = 0; i < spans.length; i++) {
+        var sp = spans[i];
+        if (sp.k === 0 || sp.k === undefined) {
+          var parts = String(sp.t).split('\n');
+          for (var j = 0; j < parts.length; j++) {
+            if (j > 0) { para.appendChild(document.createElement('br')); }
+            para.appendChild(textNode(parts[j]));
+          }
+        } else {
+          para.appendChild(spanElement(sp));
+        }
+      }
+      root.appendChild(para);
+    }
+    reportHeight();
+    if (window.arkBridge && window.arkBridge.onStats) {
+      var fontInfo = { status: 'n/a', main: false, size: -1 };
+      try {
+        if (document.fonts) {
+          fontInfo.status = document.fonts.status;
+          fontInfo.main = document.fonts.check('1em KaTeX_Main');
+          fontInfo.size = document.fonts.size;
+        }
+      } catch (e) { fontInfo.status = 'err'; }
+      window.arkBridge.onStats(JSON.stringify({
+        katex: (typeof katex !== 'undefined'),
+        attempted: stats.attempted,
+        failed: stats.failed,
+        rendered: root.getElementsByClassName('katex').length,
+        chars: root.textContent.length,
+        fontStatus: fontInfo.status,
+        fontMain: fontInfo.main,
+        fontFaces: fontInfo.size,
+        hRect: lastMeasure.rect,
+        hScroll: lastMeasure.scroll,
+        hUsed: lastMeasure.used
+      }));
+      // 字体探测的 fetch 已移除:rawfile 源下 fetch 被拦(TypeError: Failed to fetch),
+      // 但 CSS 的 url() 走的是另一条路,字体其实加载正常(fontMain 会变 true)。
+      // 每次渲染都打一条失败日志没有价值,所以只留 fontStatus / fontMain。
+    }
+  };
+
+  /**
+   * 把内容高度报给原生。WebView 不会自己长到内容高度,
+   * 原生那边必须拿到这个数字才能把卡片排对。
+   * 字体是异步加载的,所以 document.fonts.ready 之后再报一次。
+   */
+  /**
+   * 量高度。**必须算上溢出。** \dfrac、\int、\sqrt 会溢出所在行框,
+   * getBoundingClientRect 不含溢出部分,按它摆放会把公式上下裁掉 ——
+   * 看起来就像「公式没渲染」。所以取 boundingRect 与各种 scrollHeight 的最大值,
+   * 再留 4px 余量。
+   */
+  function measure() {
+    // **只量元素自己,绝不要用 documentElement/body 的 scrollHeight。**
+    // 那两个至少等于视口高度,而视口高度又是我们上报的高度 —— 会自激振荡,
+    // 实测一路涨到 300vp。element-based 才是稳定的。
+    var rect = Math.ceil(root.getBoundingClientRect().height);
+    var used = Math.max(rect, root.scrollHeight);
+    lastMeasure = { rect: rect, scroll: root.scrollHeight, used: used };
+    return used;
+  }
+
+  function reportHeight() {
+    var h = measure();
+    if (window.arkBridge && window.arkBridge.onHeight) {
+      window.arkBridge.onHeight(h);
+    }
+    // 字体是异步加载的,加载完字形宽高会变,要再量一次。
+    // **这里也必须走 measure()** —— 早先这一处还在用 boundingRect,
+    // 而它是最后上报的,于是把修正后的高度又改回了偏小的值。
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(function () {
+        var h2 = measure();
+        if (h2 !== h && window.arkBridge && window.arkBridge.onHeight) {
+          window.arkBridge.onHeight(h2);
+        }
+      });
+    }
+  }
+
+  window.addEventListener('resize', reportHeight);
+  // 告诉原生:壳已经就绪,可以灌内容了
+  if (window.arkBridge && window.arkBridge.onReady) {
+    window.arkBridge.onReady();
+  }
+})();
+</script>
+</body>
+</html>

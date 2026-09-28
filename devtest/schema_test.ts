@@ -81,7 +81,7 @@ check('review_log 实际列与 LOG_COLUMNS 一致',
 // ================================================================ 2. 约束
 console.log('\n=== 2. 表约束真的生效 ===');
 
-db.exec(`INSERT INTO decks (name, parent_id) VALUES ('DataStructure', 0)`);
+db.exec(`INSERT INTO decks (name) VALUES ('DataStructure')`);
 db.exec(`INSERT INTO notes (deck_id, type, front, back, title, fingerprint, uuid, updated_at)
          VALUES (1, 2, '栈是{{后进先出}}的', '', '基础填空 (1)', 'fp-001', 'uuid-n1', 1000)`);
 db.exec(`INSERT INTO cards (note_id, ordinal, uuid, updated_at) VALUES (1, 0, 'uuid-c1', 1000)`);

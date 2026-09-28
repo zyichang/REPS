@@ -33,7 +33,6 @@ export enum NoteType {
   Cloze = 2
 }
 
-export const NOTE_TYPE_LABEL: string[] = ['问答', '选择题', '完形填空'];
 
 /**
  * 每张卡片的学习状态(与 scheduling 表一一对应)。
@@ -91,11 +90,10 @@ export interface ReviewLog {
   algo: string;
 }
 
-/** 卡组。用 parentId 表达 Quizify 的 `A::B` 嵌套 */
+/** 卡组。**平的** —— 一本书一个卡组,没有层级,见 Schema 里 decks 的注释 */
 export interface Deck {
   id: number;
   name: string;
-  parentId: number;
 }
 
 /** 一条笔记 = 导入源里的一张「题」 */
@@ -144,8 +142,6 @@ export enum Mastery {
   Mastered = 4
 }
 
-export const MASTERY_LABEL: string[] = ['未学', '生疏', '眼熟', '熟练', '已掌握'];
 export const MASTERY_COLOR: string[] = ['#B0B7C3', '#F5A623', '#4A90D9', '#3FBF7F', '#2E9E63'];
-export const GRADE_LABEL: string[] = ['忘了', '困难', '良好', '简单'];
 export const GRADE_COLOR: string[] = ['#E5544B', '#F5A623', '#4A90D9', '#3FBF7F'];
 export const PHASE_LABEL: string[] = ['新卡', '学习中', '复习中', '重学中'];

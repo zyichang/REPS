@@ -10,6 +10,7 @@
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname, join, relative } from 'node:path';
+import { NoteType } from './Models';
 import { ParsedDeck, QuizifyError, parseQuizify } from './Quizify';
 
 function walk(dir: string): string[] {
@@ -45,6 +46,9 @@ let okCards = 0;
 let skipped = 0;
 let choiceCards = 0;
 let qaCards = 0;
+let clozeNotes = 0;
+/** 完形填空会把一条笔记展开成多张卡,所以卡片数 >= 笔记数 */
+let generatedCards = 0;
 /** 正面里还残留 ;;; 的卡 —— 一张都不该有,那等于把答案印在题面上 */
 const leaks: string[] = [];
 /** 是选择题但没取到答案字母的卡 */
@@ -89,11 +93,14 @@ for (const root of roots) {
       okFiles++;
       okCards += deck.cards.length;
       for (const c of deck.cards) {
-        if (c.options.length > 0) {
+        generatedCards += 1;   // ADR-0002:一条笔记恒等于一张卡
+        if (c.type === NoteType.Choice) {
           choiceCards++;
           if (c.answer.length === 0) {
             noAnswer.push(`${rel} :: ${c.key}`);
           }
+        } else if (c.type === NoteType.Cloze) {
+          clozeNotes++;
         } else {
           qaCards++;
         }
@@ -138,8 +145,10 @@ if (failures.length > 0) {
   }
 }
 
-console.log(`\n===== 卡片类型 =====`);
-console.log(`  选择题 ${choiceCards} 张,问答 ${qaCards} 张`);
+console.log(`\n===== 卡片类型(按笔记) =====`);
+console.log(`  选择题 ${choiceCards}  问答 ${qaCards}  完形填空 ${clozeNotes}`);
+console.log(`  笔记 ${okCards} 条 -> 实际生成卡片 ${generatedCards} 张` +
+  (generatedCards > okCards ? `(完形填空多出 ${generatedCards - okCards} 张)` : ''));
 
 console.log(`\n===== 安全检查:答案有没有泄露到正面 =====`);
 if (leaks.length === 0) {

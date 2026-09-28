@@ -48,6 +48,11 @@ export interface ParsedCard {
   options: string[];
   /** 选择题的正确答案字母,如 `B` 或 `ABD`。非选择题为空串 */
   answer: string;
+  /**
+   * 完形填空的挖空个数。**这个数就是要为这条笔记生成多少张卡** ——
+   * 仅记录空的个数,**不决定卡片数**(ADR-0002)。非完形填空为 0。
+   */
+  clozeCount: number;
   type: NoteType;
   /** 这张卡在文件里的序号,从 0 起,仅用于报错定位 */
   index: number;
@@ -57,10 +62,11 @@ export interface ParsedCard {
 
 /** 整份文件的解析结果 */
 export interface ParsedDeck {
-  /** front matter 里的 deck,如 'Math_880::Chapter_2' */
+  /**
+    * front matter 里的 deck,就是书名本身。
+    * **不再有层级** —— `::` 没有特殊含义了,写进去就是名字的一部分。
+    */
   deck: string;
-  /** deck 按 :: 拆开的层级 */
-  deckPath: string[];
   tags: string[];
   format: number;
   /**
@@ -71,15 +77,38 @@ export interface ParsedDeck {
   cards: ParsedCard[];
 }
 
+/**
+ * 报错文案的语言。**注入式,本模块不 import i18n** ——
+ * 它是纯逻辑、要在桌面上跑回归测试,不能牵进界面依赖。
+ * 默认中文,所以现有断言不受影响;AppStore 在初始化和切语言时调用 setMessageLang。
+ */
+let MSG_EN: boolean = false;
+
+export function setMessageLang(lang: string): void {
+  MSG_EN = lang === 'en';
+}
+
+/** 取一条双语文案 */
+function m(zh: string, en: string): string {
+  return MSG_EN ? en : zh;
+}
+
+/** 「第 N 行: 」前缀。和报错正文用同一套语言 */
+function linePrefix(line: number): string {
+  return MSG_EN ? `Line ${line}: ` : `第 ${line} 行: `;
+}
+
 /** 解析失败。message 面向用户,line 指出出问题的行 */
 export class QuizifyError extends Error {
   readonly line: number;
 
   constructor(message: string, line: number) {
-    super(line > 0 ? `第 ${line} 行: ${message}` : message);
+    // 行号前缀也要跟着语言走 —— 只翻正文会得到「第 3 行: front must be quoted」
+    super(line > 0 ? linePrefix(line) + message : message);
     this.line = line;
   }
 }
+
 
 const MARK_CARD: string = '+++';
 const MARK_SIDE: string = '***';
@@ -313,6 +342,89 @@ function trimBlankEdges(lines: string[]): string {
   return lines.slice(a, b).join('\n');
 }
 
+// ---------------------------------------------------------------- 完形填空
+
+/** 挖空的占位符。用方括号而不是纯下划线,边界清楚一些 */
+const BLANK: string = '[____]';
+
+/**
+ * 取出正面里所有 `{{挖空}}` 的答案,按出现顺序。
+ *
+ * **一条笔记就是一张卡,挖几个空都一样。**导入进来是什么样,显示就是什么样,
+ * 软件不做任何拆分或生成 —— 想让一句话产出三张卡,就在 YAML / Markdown 里
+ * 自己写三张。见 docs/adr/0002。
+ *
+ * 围栏代码块内部的 {{}} 不算挖空:代码里出现双花括号很正常
+ * (模板语法、C++ 初始化列表都会)。
+ */
+export function clozeAnswers(front: string): string[] {
+  const out: string[] = [];
+  const lines = front.split('\n');
+  let inFence = false;
+  for (const raw of lines) {
+    if (isFence(raw)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) {
+      continue;
+    }
+    const re = /\{\{([^}]*)\}\}/g;
+    let m = re.exec(raw);
+    while (m !== null) {
+      out.push(m[1].trim());
+      m = re.exec(raw);
+    }
+  }
+  return out;
+}
+
+/**
+ * 渲染完形填空卡的正面。
+ *
+ * **所有挖空同时生效**:未揭开时每个空都是空的,揭开时每个空都填上答案。
+ * 不再按 ordinal 只挖一个 —— 一张卡有几个空,就同时考这几个空。
+ *
+ * revealed 为假 → 全部显示为空;为真 → 全部显示答案原文。
+ */
+export function renderCloze(front: string, revealed: boolean): string {
+  let inFence = false;
+  const lines = front.split('\n');
+  const out: string[] = [];
+
+  for (const raw of lines) {
+    if (isFence(raw)) {
+      inFence = !inFence;
+      out.push(raw);
+      continue;
+    }
+    if (inFence) {
+      out.push(raw);
+      continue;
+    }
+    let line = '';
+    let i = 0;
+    while (i < raw.length) {
+      const start = raw.indexOf('{{', i);
+      if (start < 0) {
+        line += raw.substring(i);
+        break;
+      }
+      const end = raw.indexOf('}}', start + 2);
+      if (end < 0) {
+        line += raw.substring(i);
+        break;
+      }
+      line += raw.substring(i, start);
+      const answer = raw.substring(start + 2, end).trim();
+      line += revealed ? answer : BLANK;
+      i = end + 2;
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
 // ---------------------------------------------------------------- front matter
 
 interface FrontMatter {
@@ -366,7 +478,8 @@ function parseFrontMatter(lines: string[], fallbackDeck?: string): FrontMatter {
     if (fallbackDeck !== undefined && fallbackDeck.length > 0) {
       return { deck: fallbackDeck, tags: [], format: 1, bodyStart: i, hadFrontMatter: false };
     }
-    throw new QuizifyError('缺少 YAML front matter。文件开头必须有 --- 包起来的 quizify 声明', i + 1);
+    throw new QuizifyError(m('缺少 YAML front matter。文件开头必须有 --- 包起来的 quizify 声明',
+      'Missing YAML front matter. The file must open with a quizify block fenced by ---'), i + 1);
   }
 
   const start = i;
@@ -380,7 +493,7 @@ function parseFrontMatter(lines: string[], fallbackDeck?: string): FrontMatter {
     i++;
   }
   if (end < 0) {
-    throw new QuizifyError('front matter 没有结束的 ---', start + 1);
+    throw new QuizifyError(m('front matter 没有结束的 ---', 'The front matter has no closing ---'), start + 1);
   }
 
   let inQuizify = false;
@@ -420,10 +533,12 @@ function parseFrontMatter(lines: string[], fallbackDeck?: string): FrontMatter {
   }
 
   if (f.deck.length === 0) {
-    throw new QuizifyError('front matter 里必须声明 quizify.deck,否则卡片没有可靠的落点', start + 1);
+    throw new QuizifyError(m('front matter 里必须声明 quizify.deck,否则卡片没有可靠的落点',
+      'front matter must declare quizify.deck, otherwise the cards have nowhere to land'), start + 1);
   }
   if (f.format !== 1) {
-    throw new QuizifyError(`不支持的 format: ${f.format}(本解析器只认 format: 1)`, start + 1);
+    throw new QuizifyError(m(`不支持的 format: ${f.format}(本解析器只认 format: 1)`,
+      `Unsupported format: ${f.format} (this parser only accepts format: 1)`), start + 1);
   }
 
   return { deck: f.deck, tags: f.tags, format: f.format, bodyStart: end + 1, hadFrontMatter: true };
@@ -520,7 +635,7 @@ export function parseQuizify(text: string, fallbackDeck?: string): ParsedDeck {
   const flush = (endLine: number): void => {
     const front = trimBlankEdges(frontLines);
     if (front.length === 0) {
-      throw new QuizifyError('这张卡的正面是空的', cardStartLine);
+      throw new QuizifyError(m('这张卡的正面是空的', 'This card has an empty front'), cardStartLine);
     }
     if (sideMarks === 0) {
       throw new QuizifyError(
@@ -528,18 +643,32 @@ export function parseQuizify(text: string, fallbackDeck?: string): ParsedDeck {
     }
     if (sideMarks > 1) {
       throw new QuizifyError(
-        `这张卡有 ${sideMarks} 条 *** 分隔线,每张卡只能有一条`, cardStartLine);
+        m(`这张卡有 ${sideMarks} 条 *** 分隔线,每张卡只能有一条`,
+        `This card has ${sideMarks} *** separators; a card may have only one`), cardStartLine);
     }
     const title = extractTitle(front);
     const choice: ChoiceBlock = extractChoiceBlock(front);
+    const stem: string = choice.found ? choice.stem : front;
+    const blanks: string[] = clozeAnswers(stem);
+
+    // 题型判定的优先级:选择题 > 完形填空 > 问答。
+    // 一张卡同时有 ;;; 和 {{}} 时按选择题处理 —— 选项已经把答案结构化了。
+    let type: NoteType = NoteType.QA;
+    if (choice.found) {
+      type = NoteType.Choice;
+    } else if (blanks.length > 0) {
+      type = NoteType.Cloze;
+    }
+
     cards.push({
       title: title,
       key: cardKeyOf(title),
-      front: choice.found ? choice.stem : front,
+      front: stem,
       back: trimBlankEdges(backLines),
       options: choice.options,
       answer: choice.answer,
-      type: choice.found ? NoteType.Choice : NoteType.QA,
+      clozeCount: type === NoteType.Cloze ? blanks.length : 0,
+      type: type,
       index: cards.length,
       line: cardStartLine,
     });
@@ -572,7 +701,7 @@ export function parseQuizify(text: string, fallbackDeck?: string): ParsedDeck {
 
     if (mark === MARK_SIDE) {
       if (region === Region.Preamble) {
-        throw new QuizifyError('出现 *** 之前必须先有 +++ 开启一张卡', lineNo);
+        throw new QuizifyError(m('出现 *** 之前必须先有 +++ 开启一张卡', 'A *** appeared before any +++ opened a card'), lineNo);
       }
       sideMarks++;
       region = Region.Back;
@@ -588,10 +717,11 @@ export function parseQuizify(text: string, fallbackDeck?: string): ParsedDeck {
   }
 
   if (inFence) {
-    throw new QuizifyError('有围栏代码块没有闭合(``` 数量为奇数)', lines.length);
+    throw new QuizifyError(m('有围栏代码块没有闭合(``` 数量为奇数)',
+      'An unclosed fenced code block (odd number of ```)'), lines.length);
   }
   if (region === Region.Preamble) {
-    throw new QuizifyError('整份文件里没有任何 +++,一张卡都没有', fm.bodyStart + 1);
+    throw new QuizifyError(m('整份文件里没有任何 +++,一张卡都没有', 'No +++ anywhere in the file, so no cards at all'), fm.bodyStart + 1);
   }
   flush(lines.length);
 
@@ -614,10 +744,46 @@ export function parseQuizify(text: string, fallbackDeck?: string): ParsedDeck {
 
   return {
     deck: fm.deck,
-    deckPath: fm.deck.split('::').map((s) => s.trim()).filter((s) => s.length > 0),
     tags: fm.tags,
     format: fm.format,
     hadFrontMatter: fm.hadFrontMatter,
     cards: cards,
   };
+}
+
+// ---------------------------------------------------------------- 手工单卡
+
+/**
+ * 把手工输入的一张卡解析成 ParsedCard。
+ *
+ * 走的还是 Quizify 那条路:拼一份只有一张卡的文档再交给 parseQuizify ——
+ * 于是手工卡的题型判定、`####` 标题、`;;;` 选项、标识键与导入卡**完全一致**。
+ * 用户在正面里写 `;;;` 它就是选择题,写 `{{}}` 它就是挖空题,不需要额外的界面开关。
+ *
+ * 失败时抛 QuizifyError,message 面向用户。
+ */
+export function parseOneCard(deck: string, front: string, back: string): ParsedCard {
+  if (front.trim().length === 0) {
+    throw new QuizifyError(m('正面不能是空的', 'The front cannot be empty'), 0);
+  }
+  if (back.trim().length === 0) {
+    throw new QuizifyError(m('背面不能是空的', 'The back cannot be empty'), 0);
+  }
+  for (const side of [front, back]) {
+    for (const raw of side.split('\n')) {
+      const t: string = raw.replace(/\s+$/, '');
+      if (t === '+++' || t === '***') {
+        throw new QuizifyError(m(`内容里不能有独占一行的 ${t}(那是卡片的结构标记)`,
+          `Content cannot contain a bare ${t} on its own line — that is a card structure marker`), 0);
+      }
+    }
+  }
+  const doc: string =
+    ['---', 'quizify:', `  deck: ${deck}`, '---', '', '+++', '', front, '***', back, ''].join('\n');
+  const parsed: ParsedDeck = parseQuizify(doc);
+  if (parsed.cards.length !== 1) {
+    throw new QuizifyError(m('内容解析出的卡片数不是 1,请检查是否混入了结构标记',
+      'The content parsed to more than one card; check for stray structure markers'), 0);
+  }
+  return parsed.cards[0];
 }

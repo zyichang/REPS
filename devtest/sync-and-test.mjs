@@ -51,6 +51,8 @@ const FILES = [
     ["'./Srs'", "'./srs'"],
   ]],
   [join(ets, 'model', 'Models.ets'), join(here, 'Models.ts'), []],
+  // 设置滚轮的档位表。纯数组 + 一个就近查找,搬出 UI 就是为了能这样测。
+  [join(ets, 'model', 'Steps.ets'), join(here, 'Steps.ts'), []],
   // 表结构与行映射。纯逻辑、不碰 @kit.*,所以能直接在 node:sqlite 上执行,
   // 桌面测试跑的就是生产那份 SQL,不存在手抄副本走样的问题。
   [join(ets, 'data', 'Schema.ets'), join(here, 'Schema.ts'), [
@@ -61,6 +63,11 @@ const FILES = [
   [join(ets, 'data', 'Quizify.ets'), join(here, 'Quizify.ts'), [
     ["'../model/Models'", "'./Models'"],
   ]],
+  // 行内标记解析。ArkUI 的 Text 不认 Markdown,切片规则必须有断言兜住。
+  [join(ets, 'data', 'Inline.ets'), join(here, 'Inline.ts'), []],
+  // YAML 子集导入。它只做「读键 + 拼成 Quizify 文本」,所以必须和 Quizify.ets
+  // 一起同步,否则 delegate 那一步解析不到模块。
+  [join(ets, 'data', 'Yaml.ets'), join(here, 'Yaml.ts'), []],
 ];
 
 for (const [src, dst, subs] of FILES) {
@@ -86,6 +93,11 @@ const suites = [
   'ebbinghaus_test.ts',
   'schema_test.ts',
   'parser_test.ts',
+  'inline_test.ts',
+  'yaml_test.ts',
+  'cards_test.ts',
+  'steps_test.ts',
+  'stats_test.ts',
 ];
 
 for (const suite of suites) {

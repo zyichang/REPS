@@ -281,8 +281,12 @@ console.log('=== 6. 「简单」可以跳过学习步进 ===');
   // Easy 无条件毕业进 Review,间隔 = round(8.2956) = 8 天
   const r = plan(newCardState(9, T0), Grade.Easy, T0);
   console.log(`  新卡 + 简单: ${r.reason}`);
-  check('简单直接毕业', r.state.phase === LearnPhase.Review, `phase=${r.state.phase}`);
-  check('间隔 = round(w[3]) = 8 天', r.intervalDays === 8, `${r.intervalDays} 天`);
+  // 这里**故意偏离官方 FSRS**:Easy 不再让没毕业的卡跳过学习步进,
+  // 详见 Srs.ets 里 passed 那段注释。记忆状态仍然按 Easy 算(见下面的 w[3] 断言)。
+  check('新卡评「简单」不直接毕业,仍在学习阶段',
+    r.state.phase === LearnPhase.Learning, `phase=${r.state.phase}`);
+  check('间隔 = learningSteps[1] = 10 分钟',
+    Math.abs(r.intervalDays - 10 / 1440) < 1e-9, `${(r.intervalDays * 1440).toFixed(1)} 分钟`);
   check('稳定性 = w[3] = 8.2956', near(r.state.stability, 8.2956, 1e-9), `S=${r.state.stability}`);
   check('难度被夹到下限 1(原始值 -4.7716307)', r.state.difficulty === 1, `D=${r.state.difficulty}`);
 }
@@ -806,6 +810,41 @@ console.log('=== 13. FSRS-6 专项:逐条钉住官方公式 ===');
       `实际 [${capMin}, ${capMax}]`);
   });
   setRandomSource(makeRng(12345));
+}
+
+
+// ---- 新卡不接受「简单」 ----
+{
+  const t0 = 1700000000000;
+  const fresh = newCardState(1);
+
+  const easy = schedule(fresh, Grade.Easy, t0, false);
+  const good = schedule(fresh, Grade.Good, t0, false);
+  check('新卡评「简单」不毕业,间隔不到一天',
+    easy.intervalDays < 1, `${easy.intervalDays}`);
+  check('新卡评「简单」的步进间隔 = 评「良好」(都走到 10 分钟那一格)',
+    Math.abs(easy.intervalDays - good.intervalDays) < 1e-9,
+    `${easy.intervalDays} vs ${good.intervalDays}`);
+  check('但记忆状态仍按「简单」算,稳定性高于「良好」',
+    easy.state.stability > good.state.stability,
+    `简单 S=${easy.state.stability.toFixed(2)} > 良好 S=${good.state.stability.toFixed(2)}`);
+  check('新卡评「简单」仍停在学习阶段',
+    easy.state.phase === LearnPhase.Learning, `phase=${easy.state.phase}`);
+
+  // 第二次答对才毕业 —— 也就是「当天至少重复两遍」
+  const second = schedule(easy.state, Grade.Good, t0 + 600000, false);
+  check('第二次答对才毕业到复习阶段',
+    second.state.phase === LearnPhase.Review, `phase=${second.state.phase}`);
+  check('毕业后的间隔以天计', second.intervalDays >= 1,
+    `${second.intervalDays}`);
+
+  // 复习卡不受影响:简单要比良好排得更远
+  const grad = second.state;
+  const rEasy = schedule(grad, Grade.Easy, t0 + 700000, false);
+  const rGood = schedule(grad, Grade.Good, t0 + 700000, false);
+  check('复习卡评「简单」不被压档,排得比「良好」更远',
+    rEasy.intervalDays > rGood.intervalDays,
+    `简单 ${rEasy.intervalDays.toFixed(2)} > 良好 ${rGood.intervalDays.toFixed(2)}`);
 }
 
 console.log(`\n===== 结果: ${pass} 通过 / ${fail} 失败 =====`);

@@ -17,7 +17,7 @@ import { Grade, LearnPhase, CardState } from '../model/Models';
 // 只从 Srs 取 SrsResult 这个**接口** —— 接口在编译期被擦掉,
 // 所以 Srs -> Ebbinghaus 的依赖是单向的,不会形成运行时循环引用。
 // 毫秒常量在本文件自己定义,正是为了不引入值依赖。
-import { SrsResult } from './Srs';
+import { SrsResult, formatInterval } from './Srs';
 
 const MIN_MS: number = 60000;
 const DAY_MS: number = 86400000;
@@ -46,7 +46,8 @@ function ladderDays(i: number): number {
 function describe(days: number): string {
   if (days < 1) {
     const mins = Math.round(days * 1440);
-    return mins >= 60 ? `${Math.round(mins / 60)} 小时` : `${mins} 分钟`;
+    // 借用 Srs 的 formatInterval,单位由它统一注入 —— 两套引擎不该各写一份单位
+    return formatInterval(mins / 1440);
   }
   return `${Math.round(days)} 天`;
 }

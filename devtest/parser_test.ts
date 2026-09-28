@@ -70,8 +70,9 @@ const basic: ParsedDeck = parseQuizify(`${FM}
 
 check('解析出 2 张卡', basic.cards.length === 2, `${basic.cards.length} 张`);
 check('deck 读对了', basic.deck === 'DataStructure::Chapter_2', basic.deck);
-check('deck 按 :: 拆成层级', basic.deckPath.join(' > ') === 'DataStructure > Chapter_2',
-  basic.deckPath.join(' > '));
+// 卡组是平的:`::` 不再有特殊含义,整串就是书名
+check('deck 原样保留,不再按 :: 拆层',
+  basic.deck === 'DataStructure::Chapter_2', basic.deck);
 check('tags 读对了', basic.tags.join(',') === 'DataStructure,第二章', basic.tags.join(','));
 check('format 默认为 1', basic.format === 1);
 check('标题取自 #### 行', basic.cards[0].title === '基础问答 (1) 什么是栈?', basic.cards[0].title);
@@ -231,8 +232,8 @@ check('缺 #### 标题时用首行文本兜底',
 // 单层 deck
 const flat: ParsedDeck = parseQuizify(
   `---\nquizify:\n  deck: SingleDeck\n---\n+++\n\n#### 单层 (1)\n***\n背面\n`);
-check('单层 deck 的 deckPath 只有一项',
-  flat.deckPath.length === 1 && flat.deckPath[0] === 'SingleDeck', flat.deckPath.join('>'));
+check('不含 :: 的 deck 原样保留',
+  flat.deck === 'SingleDeck', flat.deck);
 
 // 报错必须带行号,否则用户无从下手
 try {
