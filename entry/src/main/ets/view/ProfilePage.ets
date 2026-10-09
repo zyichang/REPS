@@ -1,7 +1,7 @@
 /**
  * 我的:一个菜单,不在根页面铺开任何设置。
  *
- * 根页面只有入口行(账号、排期算法、集合参数、导入格式、语言)加一个开关;
+ * 根页面只有入口行(排期算法、集合参数、导入格式、语言)加一个开关;
  * 每个入口点进去是一个独立子页,左上 `‹` 返回。副标题直接显示当前值,
  * 所以不展开也看得到设置内容。
  *
@@ -22,7 +22,6 @@ import {
 } from '../store/AppStore';
 import { LIMIT_STEPS, NEW_STEPS, RETENTION_PCT, nearestStepIndex } from '../model/Steps';
 import { getFsrsParams, setFsrsParams } from '../srs/Srs';
-import { LoginPage } from './LoginPage';
 import { L, LANG_EN, LANG_ZH, algoLabels, fmt } from '../i18n/Strings';
 
 /** 根页面显示哪一层。0 是菜单本身 */
@@ -56,10 +55,7 @@ export struct ProfilePage {
   @State private newPerDay: number = DEFAULT_NEW_PER_DAY;
   @State private retention: number = DEFAULT_RETENTION;
   @State private aheadCount: number = DEFAULT_AHEAD_COUNT;
-  @State private accountName: string = '';
   @State private autoNext: boolean = true;
-  /** true 时显示登录页而不是设置列表 */
-  @State private showLogin: boolean = false;
   /** 当前在哪一层子页 */
   @State private sub: Sub = Sub.Root;
   /**
@@ -80,21 +76,18 @@ export struct ProfilePage {
   }
 
   /**
-   * 系统返回 / 侧滑返回。一次只弹一层:先登录页,再子页。
+   * 系统返回 / 侧滑返回。一次只弹一层子页。
    * 弹完要重算 canBack,否则 Index 会以为还能返回,系统返回就被吃掉、退不出应用。
    */
   onBackReq(): void {
-    if (this.showLogin) {
-      this.showLogin = false;
-      this.pull();
-    } else if (this.sub !== Sub.Root) {
+    if (this.sub !== Sub.Root) {
       this.sub = Sub.Root;
     }
     this.syncCanBack();
   }
 
   private syncCanBack(): void {
-    this.canBack = this.showLogin || this.sub !== Sub.Root;
+    this.canBack = this.sub !== Sub.Root;
   }
 
   private enter(where: Sub): void {
@@ -112,7 +105,6 @@ export struct ProfilePage {
     this.newPerDay = st.newPerDay;
     this.retention = st.retention;
     this.aheadCount = st.aheadCount;
-    this.accountName = st.accountName;
     this.autoNext = st.autoNext;
     this.deckLabel = st.currentDeckId === 0
       ? '全部卡组' : st.getDb().deckName(st.currentDeckId);
@@ -296,7 +288,7 @@ export struct ProfilePage {
       .alignItems(HorizontalAlign.Start).layoutWeight(1)
 
       if (this.isPicked(which)) {
-        Text('✓').fontSize(17).fontColor('#2E9E63')
+        Text('✓').fontSize(17).fontColor('#07C160')
       }
     }
     .width('100%').padding({ top: 10, bottom: 10 })
@@ -313,7 +305,7 @@ export struct ProfilePage {
       Text(which === 0 ? L(this.lang).langChinese : L(this.lang).langEnglish)
         .fontSize(15).layoutWeight(1)
       if ((which === 0 && this.lang !== LANG_EN) || (which === 1 && this.lang === LANG_EN)) {
-        Text('✓').fontSize(17).fontColor('#2E9E63')
+        Text('✓').fontSize(17).fontColor('#07C160')
       }
     }
     .width('100%').padding({ top: 10, bottom: 10 })
@@ -358,21 +350,13 @@ export struct ProfilePage {
    * 而且没有任何报错。只让 @Builder 提供 Scroll 的孩子就没事。
    */
   build() {
-    if (this.showLogin) {
-      LoginPage({ onBack: () => {
-        this.showLogin = false;
-        this.pull();
-        this.syncCanBack();
-      } })
-    } else {
-      Scroll() {
-        this.currentBody()
-      }
-      .width('100%').height('100%').backgroundColor('#FFFFFF')
-      .scrollable(ScrollDirection.Vertical)
-      .scrollBar(BarState.Auto)
-      .edgeEffect(EdgeEffect.Spring)
+    Scroll() {
+      this.currentBody()
     }
+    .width('100%').height('100%').backgroundColor('#FFFFFF')
+    .scrollable(ScrollDirection.Vertical)
+    .scrollBar(BarState.Auto)
+    .edgeEffect(EdgeEffect.Spring)
   }
 
   /** 按当前层给出 Scroll 的孩子 */
@@ -397,25 +381,6 @@ export struct ProfilePage {
     Column({ space: 12 }) {
       Text(L(this.lang).meTitle).fontSize(24).fontWeight(FontWeight.Bold)
         .width('100%').margin({ top: 14 })
-
-      // ---- 账号 ----
-      Row() {
-        Column({ space: 3 }) {
-          Text(this.accountName.length > 0 ? this.accountName : L(this.lang).notSignedIn)
-            .fontSize(16).fontWeight(FontWeight.Medium)
-          Text(this.accountName.length > 0
-            ? L(this.lang).accountLocalHint
-            : L(this.lang).loginReadyHint)
-            .fontSize(11).fontColor('#8A8A8E')
-        }
-        .alignItems(HorizontalAlign.Start).layoutWeight(1)
-        Text('›').fontSize(22).fontColor('#C2C8D2')
-      }
-      .width('100%').padding(14).borderRadius(12).backgroundColor('#F5F5F7')
-      .onClick(() => {
-        this.showLogin = true;
-        this.syncCanBack();
-      })
 
       // ---- 当前卡组 ----
       Column({ space: 4 }) {

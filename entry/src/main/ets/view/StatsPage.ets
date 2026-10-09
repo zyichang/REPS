@@ -167,15 +167,15 @@ export struct StatsPage {
       return '#EFEFF4';
     }
     if (n < 5) {
-      return '#C8E6D0';
+      return '#C3EED6';
     }
     if (n < 15) {
-      return '#8FD0A6';
+      return '#83DDAA';
     }
     if (n < 40) {
-      return '#4FB477';
+      return '#3FCD80';
     }
-    return '#2E9E63';
+    return '#07C160';
   }
 
   /** 一列 = 一周七天。只接常量下标 */
@@ -243,7 +243,7 @@ export struct StatsPage {
     Column({ space: 2 }) {
       Text(this.timeLabel(i)).fontSize(9).fontColor('#8A8A8E')
       Rect({ width: 18, height: this.timeHeight(i) })
-        .radius(2).fill('#2E9E63')
+        .radius(2).fill('#07C160')
     }
     .layoutWeight(1).justifyContent(FlexAlign.End)
   }

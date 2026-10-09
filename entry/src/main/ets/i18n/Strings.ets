@@ -99,9 +99,6 @@ export interface Dict {
 
   // ---- 我的 ----
   meTitle: string;
-  notSignedIn: string;
-  accountLocalHint: string;
-  loginReadyHint: string;
   currentStudy: string;
   algoSection: string;
   algoHint: string;
@@ -131,23 +128,6 @@ export interface Dict {
   aboutSection: string;
   aboutTagline: string;
   aboutLocal: string;
-
-  // ---- 账号 ----
-  accountTitle: string;
-  noBackendTitle: string;
-  noBackendBody: string;
-  accountField: string;
-  accountPlaceholder: string;
-  passwordField: string;
-  passwordPlaceholder: string;
-  signIn: string;
-  signOut: string;
-  currentAccount: string;
-  notSynced: string;
-  signUpLater: string;
-  needBoth: string;
-  signedInLocal: string;
-  signedOut: string;
 
  // ---- 作答反馈 ----
   dontKnow: string;
@@ -287,9 +267,6 @@ const ZH: Dict = {
   handWriteHint: '手写一张,题型由内容决定',
 
   meTitle: '我的',
-  notSignedIn: '未登录',
-  accountLocalHint: '本机记录,尚未同步',
-  loginReadyHint: '登录界面已就绪,后端还没定',
   currentStudy: '当前学习',
   algoSection: '排期算法',
   algoHint: '两个引擎共用同一份学习记录,随时切换不丢进度。',
@@ -320,19 +297,6 @@ const ZH: Dict = {
   aboutTagline: '一天的学习量是 a set,一次作答是 a rep。',
   aboutLocal: '纯本地运行,不申请任何权限。卡片来自你自己的文件,'
     + '排期算在设备上,数据库在应用沙箱里。',
-
-  accountTitle: '账号',
-  noBackendTitle: '还没有服务端',
-  noBackendBody: '这一页只是界面。不会联网,也不会保存密码 —— '
-    + '请不要在这里输入你在别处真正使用的密码。',
-  accountField: '账号', accountPlaceholder: '邮箱或手机号',
-  passwordField: '密码', passwordPlaceholder: '密码',
-  signIn: '登录', signOut: '退出登录',
-  currentAccount: '当前账号', notSynced: '本机记录,未同步到任何地方',
-  signUpLater: '注册 / 忘记密码 —— 等后端定下来再做',
-  needBoth: '账号和密码都要填',
-  signedInLocal: '已记住账号名(仅本机)。后端接好之前,这不是真正的登录。',
-  signedOut: '已退出(只是清掉本机记录)',
 
  dontKnow: '不知道', nextOne: '下一个',
   correctTitle: '回答正确', wrongTitle: '回答错误',
@@ -424,9 +388,6 @@ const EN: Dict = {
   handWriteHint: 'Write one by hand; the type follows the content',
 
   meTitle: 'Me',
-  notSignedIn: 'Not signed in',
-  accountLocalHint: 'Stored on this device, not synced',
-  loginReadyHint: 'Login screen is ready; no backend chosen yet',
   currentStudy: 'Currently studying',
   algoSection: 'Scheduler',
   algoHint: 'Both engines share one review history; switch any time without losing progress.',
@@ -460,20 +421,6 @@ const EN: Dict = {
   aboutTagline: "A day's workload is a set; one answer is a rep.",
   aboutLocal: 'Runs entirely on device and requests no permissions. Cards come from your own '
     + 'files, scheduling is computed locally, and the database stays in the app sandbox.',
-
-  accountTitle: 'Account',
-  noBackendTitle: 'No server yet',
-  noBackendBody: 'This screen is UI only. It does not go online and does not store your '
-    + 'password — please do not type a password you use elsewhere.',
-  accountField: 'Account', accountPlaceholder: 'Email or phone',
-  passwordField: 'Password', passwordPlaceholder: 'Password',
-  signIn: 'Sign in', signOut: 'Sign out',
-  currentAccount: 'Current account', notSynced: 'Stored on this device only',
-  signUpLater: 'Sign up / forgot password — once the backend is settled',
-  needBoth: 'Fill in both account and password',
-  signedInLocal: 'Account name remembered on this device. Not a real sign-in until the '
-    + 'backend exists.',
-  signedOut: 'Signed out (local record cleared)',
 
  dontKnow: "Don't know", nextOne: 'Next',
   correctTitle: 'Correct', wrongTitle: 'Incorrect',

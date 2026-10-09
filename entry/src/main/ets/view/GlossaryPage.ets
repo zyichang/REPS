@@ -29,7 +29,7 @@ import { MarkupText } from './MarkupText';
 import { MathText, hasMath } from './MathText';
 import { common } from '@kit.AbilityKit';
 
-const TYPE_TINT: string[] = ['#4A90D9', '#B26BD9', '#2E9E63'];
+const TYPE_TINT: string[] = ['#4A90D9', '#B26BD9', '#07C160'];
 const PREVIEW_MAX: number = 42;
 
 /** 这一页的五种形态。每种都只有一个退出方向 */
@@ -482,7 +482,7 @@ export struct GlossaryPage {
     Column({ space: 12 }) {
       Row({ space: 14 }) {
         Column() {
-          BookCover({ tint: '#2E9E63', spine: '#24794C' })
+          BookCover({ tint: '#07C160', spine: '#06A050' })
         }
         .layoutWeight(2)
 
@@ -536,9 +536,9 @@ export struct GlossaryPage {
         .width('100%').maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
 
       Row({ space: 10 }) {
-        Text(L(this.lang).preview).fontSize(13).fontColor('#2E9E63')
+        Text(L(this.lang).preview).fontSize(13).fontColor('#07C160')
           .padding({ left: 12, right: 12, top: 5, bottom: 5 })
-          .borderRadius(6).backgroundColor('#E8F5EE')
+          .borderRadius(6).backgroundColor('#E6F8EE')
           .onClick(() => this.openPreview(i))
         Text(L(this.lang).edit).fontSize(13).fontColor('#4A90D9')
           .padding({ left: 12, right: 12, top: 5, bottom: 5 })
@@ -566,7 +566,7 @@ export struct GlossaryPage {
         .onClick(() => this.pickDeck(i))
 
         if (this.decks[i].id === this.deckId) {
-          Text('✓').fontSize(17).fontColor('#2E9E63').margin({ right: 10 })
+          Text('✓').fontSize(17).fontColor('#07C160').margin({ right: 10 })
         }
         Text(L(this.lang).deleteDeck)
           .fontSize(12).fontColor('#E5544B')
@@ -649,7 +649,7 @@ export struct GlossaryPage {
           }
           .alignItems(HorizontalAlign.Start).layoutWeight(1)
           if (this.deckId === 0) {
-            Text('✓').fontSize(17).fontColor('#2E9E63')
+            Text('✓').fontSize(17).fontColor('#07C160')
           }
         }
         .width('90%').padding(14).backgroundColor(Color.White).borderRadius(10)

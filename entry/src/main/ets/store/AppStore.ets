@@ -34,8 +34,6 @@ const K_NEW_PER_DAY: string = 'new_per_day';
 const K_RETENTION: string = 'target_retention';
 const K_CURRENT_DECK: string = 'current_deck_id';
 const K_AHEAD_COUNT: string = 'ahead_count';
-/** **只存显示用的账号名,永远不存密码。** 见 LoginPage 的注释 */
-const K_ACCOUNT_NAME: string = 'account_name';
 const K_LANG: string = 'lang';
 const K_AUTO_NEXT: string = 'auto_next';
 
@@ -104,8 +102,6 @@ class Store {
   currentDeckId: number = 0;
   /** 「学习更多」每次提前拿几张 */
   aheadCount: number = DEFAULT_AHEAD_COUNT;
-  /** 显示用的账号名,空串表示未登录。**不是凭据** */
-  accountName: string = '';
   /** 'zh' 或 'en'。真正驱动界面的是 AppStorage 里的 SK_LANG */
   lang: string = LANG_ZH;
   /** 答对之后自动进入下一张(否则停在解析界面等用户点「下一个」) */
@@ -141,7 +137,6 @@ class Store {
     this.retention = p.getSync(K_RETENTION, DEFAULT_RETENTION) as number;
     this.currentDeckId = p.getSync(K_CURRENT_DECK, 0) as number;
     this.aheadCount = p.getSync(K_AHEAD_COUNT, DEFAULT_AHEAD_COUNT) as number;
-    this.accountName = p.getSync(K_ACCOUNT_NAME, '') as string;
     this.lang = p.getSync(K_LANG, LANG_ZH) as string;
     // preferences 这一层只存字符串/数字,布尔用 1/0 表示
     this.autoNext = (p.getSync(K_AUTO_NEXT, 1) as number) !== 0;
@@ -182,16 +177,6 @@ class Store {
   setAheadCount(n: number): void {
     this.aheadCount = n < 1 ? 1 : n;
     this.put(K_AHEAD_COUNT, this.aheadCount);
-    this.bump();
-  }
-
-  /**
-   * 记住显示用的账号名。**不要在这里加密码参数** ——
-   * 没有服务端的应用保存密码只有风险没有收益(见 LoginPage)。
-   */
-  setAccountName(name: string): void {
-    this.accountName = name;
-    this.put(K_ACCOUNT_NAME, name);
     this.bump();
   }
 

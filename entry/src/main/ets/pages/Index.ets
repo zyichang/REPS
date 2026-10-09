@@ -31,7 +31,7 @@ function tabLabel(lang: string, i: number): string {
   const d = L(lang);
   return i === 0 ? d.tabStudy : i === 1 ? d.tabStats : i === 2 ? d.tabGlossary : d.tabMe;
 }
-const ACTIVE: string = '#2E9E63';
+const ACTIVE: string = '#07C160';
 const INACTIVE: string = '#B0B7C3';
 const ICON_BOX: number = 22;
 
@@ -198,7 +198,7 @@ struct Index {
             .fontColor(this.bootError.length > 0 ? '#FFD9D6' : 'rgba(255,255,255,0.72)')
         }
         .width('100%').height('100%').justifyContent(FlexAlign.Center)
-        .backgroundColor('#227C50')
+        .backgroundColor('#06AD56')
       } else {
         Tabs({ barPosition: BarPosition.End, index: this.current }) {
           TabContent() {
