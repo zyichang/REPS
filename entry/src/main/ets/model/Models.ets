@@ -142,6 +142,6 @@ export enum Mastery {
   Mastered = 4
 }
 
-export const MASTERY_COLOR: string[] = ['#B0B7C3', '#F5A623', '#4A90D9', '#5ED69A', '#07C160'];
-export const GRADE_COLOR: string[] = ['#E5544B', '#F5A623', '#4A90D9', '#5ED69A'];
+export const MASTERY_COLOR: string[] = ['#B0B7C3', '#F5A623', '#3B82F6', '#6EE7B7', '#10B981'];
+export const GRADE_COLOR: string[] = ['#E5544B', '#F5A623', '#3B82F6', '#6EE7B7'];
 export const PHASE_LABEL: string[] = ['新卡', '学习中', '复习中', '重学中'];

@@ -288,7 +288,7 @@ export struct ProfilePage {
       .alignItems(HorizontalAlign.Start).layoutWeight(1)
 
       if (this.isPicked(which)) {
-        Text('✓').fontSize(17).fontColor('#07C160')
+        Text('✓').fontSize(17).fontColor('#3B82F6')
       }
     }
     .width('100%').padding({ top: 10, bottom: 10 })
@@ -305,7 +305,7 @@ export struct ProfilePage {
       Text(which === 0 ? L(this.lang).langChinese : L(this.lang).langEnglish)
         .fontSize(15).layoutWeight(1)
       if ((which === 0 && this.lang !== LANG_EN) || (which === 1 && this.lang === LANG_EN)) {
-        Text('✓').fontSize(17).fontColor('#07C160')
+        Text('✓').fontSize(17).fontColor('#3B82F6')
       }
     }
     .width('100%').padding({ top: 10, bottom: 10 })
@@ -337,7 +337,7 @@ export struct ProfilePage {
       .alignItems(HorizontalAlign.Start).layoutWeight(1)
 
       Text(this.stepLabel(which, this.currentNum(which)))
-        .fontSize(15).fontColor('#4A90D9').fontWeight(FontWeight.Medium)
+        .fontSize(15).fontColor('#3B82F6').fontWeight(FontWeight.Medium)
       Text('›').fontSize(18).fontColor('#C2C8D2').margin({ left: 6 })
     }
     .width('100%').padding({ top: 12, bottom: 12 })

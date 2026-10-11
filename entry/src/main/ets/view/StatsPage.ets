@@ -161,21 +161,21 @@ export struct StatsPage {
     }
   }
 
-  /** 作答次数 -> 颜色深浅。0 次是空格,不是最浅的绿 */
+  /** 作答次数 -> 颜色深浅。0 次是空格,不是最浅的蓝 */
   private heatColor(n: number): string {
     if (n <= 0) {
       return '#EFEFF4';
     }
     if (n < 5) {
-      return '#C3EED6';
+      return '#DBE7FD';
     }
     if (n < 15) {
-      return '#83DDAA';
+      return '#93B9F9';
     }
     if (n < 40) {
-      return '#3FCD80';
+      return '#5B95F6';
     }
-    return '#07C160';
+    return '#3B82F6';
   }
 
   /** 一列 = 一周七天。只接常量下标 */
@@ -243,7 +243,7 @@ export struct StatsPage {
     Column({ space: 2 }) {
       Text(this.timeLabel(i)).fontSize(9).fontColor('#8A8A8E')
       Rect({ width: 18, height: this.timeHeight(i) })
-        .radius(2).fill('#07C160')
+        .radius(2).fill('#3B82F6')
     }
     .layoutWeight(1).justifyContent(FlexAlign.End)
   }
@@ -336,7 +336,7 @@ export struct StatsPage {
               Column() {
                 Text(n > 0 ? `${n}` : '').fontSize(9).fontColor('#8A8A8E')
                 Rect({ width: 14, height: this.barHeight(n) })
-                  .radius(2).fill('#4A90D9').margin({ top: 2 })
+                  .radius(2).fill('#3B82F6').margin({ top: 2 })
               }
               .layoutWeight(1).justifyContent(FlexAlign.End)
             })

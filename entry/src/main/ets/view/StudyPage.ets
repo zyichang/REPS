@@ -457,10 +457,10 @@ export struct StudyPage {
     const letter: string = this.letterOf(i);
     const isAnswer: boolean = this.cardAnswer.toUpperCase().includes(letter);
     if (this.judged === 0) {
-      return this.isPicked(i) ? '#D8EAFB' : '#F5F5F7';
+      return this.isPicked(i) ? '#DBE7FD' : '#F5F5F7';
     }
     if (isAnswer) {
-      return '#CDF3DD';
+      return '#D1FAE5';
     }
     return this.isPicked(i) ? '#FBD9D6' : '#F5F5F7';
   }
@@ -597,7 +597,7 @@ export struct StudyPage {
     .borderWidth(1).borderColor('#E5E5EA')
   }
 
-  /** 一段。**只接常量下标**:0 绿(已稳) / 1 灰(今天还回来) / 2 白(未碰) */
+  /** 一段。**只接常量下标**:0 蓝(已稳) / 1 灰(今天还回来) / 2 白(未碰) */
   @Builder
   barSegment(which: number) {
     Row() {
@@ -611,7 +611,7 @@ export struct StudyPage {
     .width(`${this.segPct(which)}%`)
     .height('100%')
     .justifyContent(FlexAlign.Center)
-    .backgroundColor(which === 0 ? '#07C160' : which === 1 ? '#C7C7CC' : '#F7F7FA')
+    .backgroundColor(which === 0 ? '#3B82F6' : which === 1 ? '#C7C7CC' : '#F7F7FA')
     .animation({ duration: BAR_ANIM_MS, curve: Curve.EaseOut })
   }
 
@@ -709,7 +709,7 @@ export struct StudyPage {
         Column() {
           Row({ space: 14 }) {
             Column() {
-              BookCover({ tint: '#07C160', spine: '#06A050' })
+              BookCover({ tint: '#3B82F6', spine: '#2563EB' })
             }
             .layoutWeight(2)
 
@@ -719,9 +719,9 @@ export struct StudyPage {
                   .fontSize(17).fontWeight(FontWeight.Bold).layoutWeight(1)
                   .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
                 Text(L(this.lang).change)
-                  .fontSize(12).fontColor('#07C160')
+                  .fontSize(12).fontColor('#3B82F6')
                   .padding({ left: 8, right: 8, top: 3, bottom: 3 })
-                  .borderRadius(6).backgroundColor('#E6F8EE')
+                  .borderRadius(6).backgroundColor('#EAF1FE')
                   .onClick(() => this.onChangeDeck())
               }
               .width('100%')
@@ -735,7 +735,7 @@ export struct StudyPage {
               Row({ space: 8 }) {
                 Column({ space: 2 }) {
                   Text(`${this.newCards}`).fontSize(17).fontWeight(FontWeight.Bold)
-                    .fontColor('#4A90D9')
+                    .fontColor('#3B82F6')
                   Text(L(this.lang).toLearn).fontSize(11).fontColor('#8A8A8E')
                 }
                 .layoutWeight(1).alignItems(HorizontalAlign.Start)
@@ -908,7 +908,7 @@ export struct StudyPage {
             // 结论先说清楚,再给答案和解析 —— 答错的人最需要的就是这一段
             if (this.judged === 1) {
               Text(L(this.lang).correctTitle).fontSize(16)
-                .fontWeight(FontWeight.Bold).fontColor('#07C160').width('100%')
+                .fontWeight(FontWeight.Bold).fontColor('#10B981').width('100%')
             } else if (this.judged === 2 || this.judged === 3) {
               Column({ space: 2 }) {
                 Text(this.judged === 3 ? L(this.lang).timeUp : L(this.lang).wrongTitle)
@@ -920,7 +920,7 @@ export struct StudyPage {
             }
             if (this.cardAnswer.length > 0) {
               Text(fmt(L(this.lang).answerIs, this.cardAnswer)).fontSize(17)
-                .fontWeight(FontWeight.Bold).fontColor('#07C160').width('100%')
+                .fontWeight(FontWeight.Bold).fontColor('#10B981').width('100%')
             }
             this.backView()
           }
@@ -945,7 +945,7 @@ export struct StudyPage {
           // 答对且设置了直接过:0.3 秒后自动翻页,这里只给一个绿色确认
           Row() {
             Text(L(this.lang).correctTitle)
-              .fontSize(16).fontWeight(FontWeight.Medium).fontColor('#07C160')
+              .fontSize(16).fontWeight(FontWeight.Medium).fontColor('#10B981')
           }
           .width('90%').height(44).justifyContent(FlexAlign.Center).margin({ bottom: 14 })
         } else {

@@ -29,7 +29,7 @@ import { MarkupText } from './MarkupText';
 import { MathText, hasMath } from './MathText';
 import { common } from '@kit.AbilityKit';
 
-const TYPE_TINT: string[] = ['#4A90D9', '#B26BD9', '#07C160'];
+const TYPE_TINT: string[] = ['#3B82F6', '#B26BD9', '#10B981'];
 const PREVIEW_MAX: number = 42;
 
 /** 这一页的五种形态。每种都只有一个退出方向 */
@@ -482,7 +482,7 @@ export struct GlossaryPage {
     Column({ space: 12 }) {
       Row({ space: 14 }) {
         Column() {
-          BookCover({ tint: '#07C160', spine: '#06A050' })
+          BookCover({ tint: '#3B82F6', spine: '#2563EB' })
         }
         .layoutWeight(2)
 
@@ -527,7 +527,7 @@ export struct GlossaryPage {
           ? fmt(L(this.lang).reviewedTimes, this.cards[i].reps)
           : L(this.lang).newCardBadge)
           .fontSize(11)
-          .fontColor(this.cards[i].reps > 0 ? '#8A8A8E' : '#4A90D9')
+          .fontColor(this.cards[i].reps > 0 ? '#8A8A8E' : '#3B82F6')
       }
       .width('100%')
 
@@ -536,13 +536,13 @@ export struct GlossaryPage {
         .width('100%').maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
 
       Row({ space: 10 }) {
-        Text(L(this.lang).preview).fontSize(13).fontColor('#07C160')
+        Text(L(this.lang).preview).fontSize(13).fontColor('#3B82F6')
           .padding({ left: 12, right: 12, top: 5, bottom: 5 })
-          .borderRadius(6).backgroundColor('#E6F8EE')
+          .borderRadius(6).backgroundColor('#EAF1FE')
           .onClick(() => this.openPreview(i))
-        Text(L(this.lang).edit).fontSize(13).fontColor('#4A90D9')
+        Text(L(this.lang).edit).fontSize(13).fontColor('#48484A')
           .padding({ left: 12, right: 12, top: 5, bottom: 5 })
-          .borderRadius(6).backgroundColor('#EAF2FB')
+          .borderRadius(6).backgroundColor('#F2F2F7')
           .onClick(() => this.openEdit(i))
         Blank()
       }
@@ -566,7 +566,7 @@ export struct GlossaryPage {
         .onClick(() => this.pickDeck(i))
 
         if (this.decks[i].id === this.deckId) {
-          Text('✓').fontSize(17).fontColor('#07C160').margin({ right: 10 })
+          Text('✓').fontSize(17).fontColor('#3B82F6').margin({ right: 10 })
         }
         Text(L(this.lang).deleteDeck)
           .fontSize(12).fontColor('#E5544B')
@@ -649,7 +649,7 @@ export struct GlossaryPage {
           }
           .alignItems(HorizontalAlign.Start).layoutWeight(1)
           if (this.deckId === 0) {
-            Text('✓').fontSize(17).fontColor('#07C160')
+            Text('✓').fontSize(17).fontColor('#3B82F6')
           }
         }
         .width('90%').padding(14).backgroundColor(Color.White).borderRadius(10)
