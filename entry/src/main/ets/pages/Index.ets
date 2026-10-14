@@ -80,7 +80,8 @@ struct Index {
 
   private async boot(): Promise<void> {
     try {
-      const ctx = getContext(this) as common.UIAbilityContext;
+      // getContext(this) 已废弃;从 UIContext 取宿主 Ability 的上下文
+      const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
       await appStore().init(ctx);
       this.ready = true;
       hilog.info(DOMAIN, TAG, '主框架就绪');
@@ -217,7 +218,6 @@ struct Index {
             ProfilePage()
           }.tabBar(this.tabItem(3))
         }
-        .barHeight(58)
         .barMode(BarMode.Fixed)
         .onChange((index: number) => { this.current = index; })
         .barHeight(this.immersive ? 0 : 56)

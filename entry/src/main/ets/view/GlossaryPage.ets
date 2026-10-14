@@ -141,7 +141,7 @@ export struct GlossaryPage {
     this.busy = true;
     this.status = L(this.lang).importing;
     try {
-      const ctx = getContext(this) as common.UIAbilityContext;
+      const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
       const r: ImportResult = await importFromPicker(ctx, appStore().getDb());
       this.status = r.ok
         ? fmt(L(this.lang).importedTo, r.cardsAdded, r.deck)

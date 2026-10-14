@@ -197,7 +197,8 @@ export struct ProfilePage {
     for (let i = 0; i < steps.length; i++) {
       range.push(this.stepLabel(which, steps[i]));
     }
-    TextPickerDialog.show({
+    // 全局 TextPickerDialog.show 已废弃,改走 UIContext,弹窗才能绑定到正确的窗口
+    this.getUIContext().showTextPickerDialog({
       range: range,
       selected: this.selectedIndex(which),
       canLoop: false,
