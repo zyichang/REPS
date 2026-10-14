@@ -60,9 +60,9 @@ struct Index {
    * 已经在顶层了才交给系统(返回 false)。
    */
   onBackPress(): boolean {
-    // 只有词卡表还用「返回计数器」。学习页用 Navigation,返回交给它自己弹栈;
-    // 不加这个判断的话,词卡表留下的 canBack 会在学习页上截走返回
-    if (this.current === 2 && this.canBack) {
+    // 学习页用 Navigation,返回交给它自己弹栈;「我的」还用返回计数器。
+    // 学习页上必须放行:别的标签留下的 canBack 会在这里截走返回
+    if (this.current !== 0 && this.canBack) {
       this.backReq = this.backReq + 1;
       return true;
     }
