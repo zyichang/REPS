@@ -27,6 +27,10 @@ export interface Dict {
   colNew: string;
   colLearn: string;
   colDue: string;
+  importDeck: string;
+  deckActions: string;
+  actClear: string;
+  actDelete: string;
 
   // ---- 学习页 ----
   appName: string;
@@ -86,7 +90,7 @@ export interface Dict {
   clearProgress: string;
   clearProgressHint: string;
   clearConfirmTitle: string;
-  clearConfirmBody: string;      // %s %d
+  clearConfirmBody: string;      // %s 卡组名, %d 张数(两种语言同一顺序)
   clearIrreversible: string;
   confirmClear: string;
   cancel: string;
@@ -227,6 +231,8 @@ const ZH: Dict = {
   deckListTitle: '牌组',
   deckListEmpty: '还没有牌组 —— 导入一个 Markdown 或 YAML 文件就能开始',
   colNew: '新', colLearn: '学习中', colDue: '待复习',
+  importDeck: '导入牌组', deckActions: '牌组操作',
+  actClear: '清空进度(卡片保留)', actDelete: '删除牌组',
 
   appName: '刻意重复',
   toLearn: '待学习', toReview: '待复习', learning: '学习中',
@@ -351,6 +357,8 @@ const EN: Dict = {
   deckListTitle: 'Decks',
   deckListEmpty: 'No decks yet — import a Markdown or YAML file to start',
   colNew: 'New', colLearn: 'Learn', colDue: 'Due',
+  importDeck: 'Import deck', deckActions: 'Deck actions',
+  actClear: 'Clear progress (keep cards)', actDelete: 'Delete deck',
 
   appName: 'REPS',
   toLearn: 'To learn', toReview: 'To review', learning: 'Learning',
@@ -387,8 +395,8 @@ const EN: Dict = {
   deletedDeck: 'Deleted “%s”',
   clearProgress: 'Clear this book’s progress', clearProgressHint: 'cards kept, reset to new',
   clearConfirmTitle: 'Clear this book’s progress?',
-  clearConfirmBody: 'All %d cards in “%s” go back to new: scheduling and review history '
-    + 'are deleted. No card itself is removed.',
+  clearConfirmBody: 'Every card in “%s” (%d in total) goes back to new: scheduling and review '
+    + 'history are deleted. No card itself is removed.',
   clearIrreversible: 'This cannot be undone.',
   confirmClear: 'Confirm clear', cancel: 'Cancel',
   deckDescEmpty: 'No cards yet',

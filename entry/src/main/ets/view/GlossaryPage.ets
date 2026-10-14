@@ -628,7 +628,7 @@ export struct GlossaryPage {
         if (this.confirmClear) {
           Column({ space: 10 }) {
             Text(L(this.lang).clearConfirmTitle).fontSize(17).fontWeight(FontWeight.Bold).width('100%')
-            Text(fmt(L(this.lang).clearConfirmBody, this.deckCards, this.deckLabel))
+            Text(fmt(L(this.lang).clearConfirmBody, this.deckLabel, this.deckCards))
               .fontSize(12).fontColor('#48484A').width('100%')
             Text(L(this.lang).clearIrreversible).fontSize(12).fontColor('#E5544B').width('100%')
             Row({ space: 8 }) {
