@@ -19,7 +19,7 @@
  * 所以 day 的含义与 dayIndex()、与学习页的「今天」仍是同一个定义。
  */
 
-import { DayStat, dayAnchor, dayIndex } from '../data/Schema';
+import { DayStat, DeckRow, dayAnchor, dayIndex } from '../data/Schema';
 import { MASTERY_COLOR } from '../model/Models';
 import { masteryOf } from '../srs/Srs';
 import { SK_LANG, SK_TICK, appStore } from '../store/AppStore';
@@ -65,8 +65,12 @@ export struct StatsPage {
   @State private mastery: number[] = [0, 0, 0, 0, 0];
   /** 最近 TIME_DAYS 天每天的学习毫秒数 */
   @State private times: number[] = [];
-  /** 下半段的标题要写清楚是哪本书 */
-  @State private deckLabel: string = '';
+  /**
+   * 下半段的卡组过滤:0 = 全部。只是看统计时的视角,不影响学习页 ——
+   * 没有「当前卡组」这回事了(ADR-0004)。
+   */
+  @State private filterDeck: number = 0;
+  @State private decks: DeckRow[] = [];
   @State private status: string = '';
 
   aboutToAppear(): void {
@@ -87,7 +91,12 @@ export struct StatsPage {
       const now: number = Date.now();
       const today: number = dayIndex(now);
       const cells: number = WEEKS * 7;
-      const deckId: number = st.currentDeckId;
+      this.decks = db.listDecks(now);
+      // 过滤的那一组被删了:回到全部
+      if (this.filterDeck !== 0 && this.decks.every((d: DeckRow) => d.id !== this.filterDeck)) {
+        this.filterDeck = 0;
+      }
+      const deckId: number = this.filterDeck;
 
       // ---- 上半段:全部卡组,全量口径 ----
       // 一条按天聚合的查询同时供上四张卡片、热力图、时长柱状图使用
@@ -129,9 +138,7 @@ export struct StatsPage {
       }
       this.times = times;
 
-      // ---- 下半段:只算当前课本 ----
-      this.deckLabel = deckId === 0
-        ? L(this.lang).allDecks : db.deckName(deckId);
+      // ---- 下半段:按所选卡组(默认全部) ----
 
       const to: number = now + FORECAST_DAYS * 86400000;
       const dues: number[] = db.dueForecastInDeck(deckId, now, to);
@@ -224,6 +231,28 @@ export struct StatsPage {
     .borderRadius(10).backgroundColor('#F5F5F7')
   }
 
+  private filterOptions(): SelectOption[] {
+    const out: SelectOption[] = [{ value: L(this.lang).allDecks }];
+    for (const d of this.decks) {
+      out.push({ value: d.name });
+    }
+    return out;
+  }
+
+  private filterIndex(): number {
+    for (let i = 0; i < this.decks.length; i++) {
+      if (this.decks[i].id === this.filterDeck) {
+        return i + 1;
+      }
+    }
+    return 0;
+  }
+
+  private filterLabel(): string {
+    const i: number = this.filterIndex();
+    return i === 0 ? L(this.lang).allDecks : this.decks[i - 1].name;
+  }
+
   /** 一段小标题 */
   @Builder
   sectionTitle(which: number) {
@@ -231,7 +260,14 @@ export struct StatsPage {
       Text(which === 0 ? L(this.lang).sectionAll : L(this.lang).sectionBook)
         .fontSize(13).fontColor('#8A8A8E').width('100%')
       if (which === 1) {
-        Text(this.deckLabel).fontSize(16).fontWeight(FontWeight.Medium).width('100%')
+        Select(this.filterOptions())
+          .selected(this.filterIndex())
+          .value(this.filterLabel())
+          .font({ size: 15, weight: FontWeight.Medium })
+          .onSelect((index: number) => {
+            this.filterDeck = index === 0 ? 0 : this.decks[index - 1].id;
+            this.reload();
+          })
       }
     }
     .width('100%').alignItems(HorizontalAlign.Start).margin({ top: 4 })

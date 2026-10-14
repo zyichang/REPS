@@ -65,7 +65,6 @@ export struct ProfilePage {
   @StorageLink(SK_LANG) lang: string = LANG_ZH;
   @StorageLink(SK_CAN_BACK) canBack: boolean = false;
   @StorageLink(SK_BACK_REQ) @Watch('onBackReq') backReq: number = 0;
-  @State private deckLabel: string = '全部卡组';
 
   aboutToAppear(): void {
     this.pull();
@@ -106,8 +105,6 @@ export struct ProfilePage {
     this.retention = st.retention;
     this.aheadCount = st.aheadCount;
     this.autoNext = st.autoNext;
-    this.deckLabel = st.currentDeckId === 0
-      ? '全部卡组' : st.getDb().deckName(st.currentDeckId);
   }
 
   private pickAlgo(which: number): void {
@@ -382,14 +379,6 @@ export struct ProfilePage {
     Column({ space: 12 }) {
       Text(L(this.lang).meTitle).fontSize(24).fontWeight(FontWeight.Bold)
         .width('100%').margin({ top: 14 })
-
-      // ---- 当前卡组 ----
-      Column({ space: 4 }) {
-        Text(L(this.lang).currentStudy).fontSize(12).fontColor('#8A8A8E').width('100%')
-        Text(this.deckLabel).fontSize(16).fontWeight(FontWeight.Medium).width('100%')
-      }
-      .width('100%').padding(14).borderRadius(12).backgroundColor('#F5F5F7')
-      .alignItems(HorizontalAlign.Start)
 
       this.entryRow(Sub.Algo)
       this.entryRow(Sub.SetParams)

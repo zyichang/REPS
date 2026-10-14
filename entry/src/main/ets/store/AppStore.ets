@@ -32,7 +32,6 @@ const K_ALGO: string = 'algo';
 const K_REVIEW_LIMIT: string = 'review_limit';
 const K_NEW_PER_DAY: string = 'new_per_day';
 const K_RETENTION: string = 'target_retention';
-const K_CURRENT_DECK: string = 'current_deck_id';
 const K_AHEAD_COUNT: string = 'ahead_count';
 const K_LANG: string = 'lang';
 const K_AUTO_NEXT: string = 'auto_next';
@@ -58,12 +57,6 @@ export const AHEAD_STEPS: number[] = [5, 10, 20, 40, 80];
 
 /** AppStorage 里的 key,UI 靠它们刷新 —— @StorageLink 才会驱动重绘 */
 export const SK_TICK: string = 'reps_tick';
-export const SK_DECK_NAME: string = 'reps_deck_name';
-/**
- * 请求切到某个标签页。学习页的「change」按钮写它,Index 监听后翻页 ——
- * 比在学习页里再复制一份卡组选择器可靠。
- */
-export const SK_GOTO_TAB: string = 'reps_goto_tab';
 /**
  * 当前语言。**必须放进 AppStorage** —— 界面要跟着切换,就只能读可观察状态;
  * 直接读 appStore().lang 的组件不会重绘(见 i18n/Strings.ets 的说明)。
@@ -98,8 +91,6 @@ class Store {
   newPerDay: number = DEFAULT_NEW_PER_DAY;
   /** 目标保持率 */
   retention: number = DEFAULT_RETENTION;
-  /** 当前选中的卡组 id,0 表示「全部卡组」 */
-  currentDeckId: number = 0;
   /** 「学习更多」每次提前拿几张 */
   aheadCount: number = DEFAULT_AHEAD_COUNT;
   /** 'zh' 或 'en'。真正驱动界面的是 AppStorage 里的 SK_LANG */
@@ -135,7 +126,6 @@ class Store {
     this.reviewLimit = p.getSync(K_REVIEW_LIMIT, DEFAULT_REVIEW_LIMIT) as number;
     this.newPerDay = p.getSync(K_NEW_PER_DAY, DEFAULT_NEW_PER_DAY) as number;
     this.retention = p.getSync(K_RETENTION, DEFAULT_RETENTION) as number;
-    this.currentDeckId = p.getSync(K_CURRENT_DECK, 0) as number;
     this.aheadCount = p.getSync(K_AHEAD_COUNT, DEFAULT_AHEAD_COUNT) as number;
     this.lang = p.getSync(K_LANG, LANG_ZH) as string;
     // preferences 这一层只存字符串/数字,布尔用 1/0 表示
@@ -223,12 +213,6 @@ class Store {
     this.bump();
   }
 
-  setCurrentDeck(id: number, name: string): void {
-    this.currentDeckId = id;
-    this.put(K_CURRENT_DECK, id);
-    AppStorage.setOrCreate(SK_DECK_NAME, name);
-    this.bump();
-  }
 
   /**
    * 让所有页面重绘。

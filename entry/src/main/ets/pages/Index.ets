@@ -12,7 +12,7 @@
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import {
-  SK_BACK_REQ, SK_CAN_BACK, SK_GOTO_TAB, SK_IMMERSIVE, SK_LANG, appStore,
+  SK_BACK_REQ, SK_CAN_BACK, SK_IMMERSIVE, SK_LANG, appStore,
 } from '../store/AppStore';
 import { L, LANG_ZH, fmt } from '../i18n/Strings';
 import { BrowserTab } from '../view/BrowserTab';
@@ -39,8 +39,6 @@ const ICON_BOX: number = 22;
 @Component
 struct Index {
   @State private current: number = 0;
-  /** 别的页面请求翻页时写 SK_GOTO_TAB,这里接住。-1 表示没有待处理的请求 */
-  @StorageLink(SK_GOTO_TAB) @Watch('onGotoTab') gotoTab: number = -1;
   /** 语言。从 AppStorage 读,这样切换时标签栏会重绘 */
   @StorageLink(SK_LANG) lang: string = LANG_ZH;
   /** 学习页进入卡片阶段时为真 —— 此时藏掉标签栏,给一个干净的作答界面 */
@@ -69,12 +67,6 @@ struct Index {
     return false;
   }
 
-  onGotoTab(): void {
-    if (this.gotoTab >= 0) {
-      this.current = this.gotoTab;
-      this.gotoTab = -1;        // 消费掉,否则下次写同样的值不会触发 @Watch
-    }
-  }
 
   aboutToAppear(): void {
     this.boot();

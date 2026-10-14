@@ -47,15 +47,12 @@ export interface Dict {
   /** 灰色段:今天答过、今天还会回来 —— 与进度条的灰严格同口径 */
   learning: string;
   startLearning: string;
-  change: string;
   allDecks: string;
   noCardsYet: string;
   reviewToday: string;
   reviewTodayNone: string;
   reviewTodayCount: string;      // 用 %d 占位
   reviewTodayAgainHint: string;
-  expand: string;
-  collapse: string;
   remain: string;
   showAnswer: string;
   clozeBlanks: string;           // %d
@@ -67,24 +64,14 @@ export interface Dict {
   studyMoreEmpty: string;
   backHome: string;
   importing: string;
-  nextIn: string;
 
   // ---- 词卡表 ----
-  menuSwitchBook: string;
-  menuImport: string;
-  menuGoStudy: string;
-  newCard: string;
-  cardBrowse: string;
-  browseHint: string;
   cardsUnit: string;
-  switchBookTitle: string;
-  cardsTitle: string;
   previewTitle: string;
   editCardTitle: string;
   newCardTitle: string;
   front: string;
   back: string;
-  preview: string;
   edit: string;
   save: string;
   deleteCard: string;
@@ -95,15 +82,11 @@ export interface Dict {
   deleteDeckBody: string;
   deleteDeckIrreversible: string;
   deletedDeck: string;
-  clearProgress: string;
-  clearProgressHint: string;
   clearConfirmTitle: string;
   clearConfirmBody: string;      // %s 卡组名, %d 张数(两种语言同一顺序)
   clearIrreversible: string;
   confirmClear: string;
   cancel: string;
-  deckDescEmpty: string;
-  deckDesc: string;             // %d %d %d
   newCardBadge: string;
   reviewedTimes: string;        // %d
   typeQA: string;
@@ -111,14 +94,9 @@ export interface Dict {
   typeCloze: string;
   frontPlaceholder: string;
   backPlaceholder: string;
-  allDecksNoNew: string;
-  pickBookFirst: string;
-  noDeckMix: string;
-  handWriteHint: string;
 
   // ---- 我的 ----
   meTitle: string;
-  currentStudy: string;
   algoSection: string;
   algoHint: string;
   dailySection: string;
@@ -173,13 +151,7 @@ export interface Dict {
   readFailed: string;
   importedTo: string;
   importFailed: string;
-  switchedTo: string;
-  switchedAll: string;
-  cannotClearAll: string;
   clearedProgress: string;
-  createdCard: string;
-  savedEdit: string;
-  deletedCard: string;
   saveFailed: string;
   bootFailed: string;
   openingDb: string;
@@ -197,9 +169,9 @@ export interface Dict {
   totalAnswers: string;
   retentionRate: string;
   masterySpread: string;
-  /** 统计页上半段:与选哪本书无关的总体数字 */
+  /** 统计页上半段:全部牌组的总体数字 */
   sectionAll: string;
-  /** 统计页下半段:只算当前这本书 */
+  /** 统计页下半段:按所选牌组(默认全部) */
   sectionBook: string;
   /** 最近 7 天学习时长 */
   studyTime: string;
@@ -247,13 +219,12 @@ const ZH: Dict = {
 
   appName: '刻意重复',
   toLearn: '待学习', toReview: '待复习', learning: '学习中',
-  startLearning: '开始学习', change: '切换', allDecks: '全部卡组',
+  startLearning: '开始学习', allDecks: '全部牌组',
   noCardsYet: '还没有卡片,先导入一个文件',
   reviewToday: '回顾今日已学',
   reviewTodayNone: '今天还没答过卡',
   reviewTodayCount: '今天答过 %d 张',
   reviewTodayAgainHint: '点一下,把今天做过的卡再过一遍',
-  expand: '展开', collapse: '收起',
   remain: '剩 %d', showAnswer: '显示答案',
   clozeBlanks: '完形填空 · %d 个空',
   setDone: '今天的一组做完了',
@@ -264,38 +235,30 @@ const ZH: Dict = {
   studyMoreEmpty: '今天和明天都没有待复习的卡了 —— 可以歇了,或者去卡组里导入新的',
   backHome: '回到本组概览',
   importing: '正在导入…',
-  nextIn: '下次',
 
-  menuSwitchBook: '切换课本', menuImport: '导入课本', menuGoStudy: '去学习',
-  newCard: '新建卡片', cardBrowse: '浏览卡片',
-  browseHint: '进去可以预览和编辑', cardsUnit: '张',
-  switchBookTitle: '切换课本', cardsTitle: '卡片',
+  
+  cardsUnit: '张',
   previewTitle: '预览', editCardTitle: '编辑卡片', newCardTitle: '新建卡片',
-  front: '正面', back: '背面', preview: '预览', edit: '编辑',
+  front: '正面', back: '背面', edit: '编辑',
   save: '保存', deleteCard: '删除这张卡',
   confirmDelete: '确认删除', cancelDelete: '取消删除',
-  deleteDeck: '删除', deleteDeckTitle: '删除这本课本?',
+  deleteDeck: '删除', deleteDeckTitle: '删除这个牌组?',
   deleteDeckBody: '「%s」及其 %d 张卡会被整本删掉,复习历史一并清除。',
   deleteDeckIrreversible: '卡片本身也会删掉,这个操作不能撤销。',
   deletedDeck: '已删除「%s」',
-  clearProgress: '清空本书进度', clearProgressHint: '卡片保留,只退回新卡',
-  clearConfirmTitle: '清空这本书的进度?',
+  clearConfirmTitle: '清空这个牌组的进度?',
   clearConfirmBody: '「%s」的 %d 张卡会全部变回新卡:排期和复习历史都会删掉,卡片本身一张不删。',
   clearIrreversible: '这个操作不能撤销。',
   confirmClear: '确认清空', cancel: '取消',
-  deckDescEmpty: '还没有卡片',
-  deckDesc: '%d 张卡 · 待复习 %d · 新卡 %d',
+  
   newCardBadge: '新卡', reviewedTimes: '已复习 %d 次',
   typeQA: '问答', typeChoice: '选择', typeCloze: '挖空',
   frontPlaceholder: '题目。{{答案}} 是挖空,;;; 块是选择题',
   backPlaceholder: '答案或解析',
-  allDecksNoNew: '「全部卡组」下不能新建 —— 先用三个点切到某一本课本',
-  pickBookFirst: '先切到某一本课本',
-  noDeckMix: '不分课本,所有卡一起学',
-  handWriteHint: '手写一张,题型由内容决定',
+  
+  
 
   meTitle: '我的',
-  currentStudy: '当前学习',
   algoSection: '排期算法',
   algoHint: '两个引擎共用同一份学习记录,随时切换不丢进度。',
   dailySection: '今日集合',
@@ -337,10 +300,8 @@ const ZH: Dict = {
   pickHint: '选一个', correctMark: '答对', wrongMark: '答错',
 
  readFailed: '读取失败: %s', importedTo: '已导入 %d 张卡到「%s」',
-  importFailed: '导入失败:%s', switchedTo: '已切到「%s」,学习页也跟着换了',
-  switchedAll: '已切到全部卡组', cannotClearAll: '「全部卡组」下不能清空 —— 先切到某一本课本',
+  importFailed: '导入失败:%s', 
   clearedProgress: '已清空「%s」的进度,%d 张卡全部变回新卡',
-  createdCard: '已新建一张卡', savedEdit: '已保存修改', deletedCard: '已删除这张卡',
   saveFailed: '保存失败: %s', bootFailed: '启动失败: %s', openingDb: '正在打开数据库…',
   answerIs: '答案 %s', nextAfter: ' · 下次 %s后',
   recentWeeks: '最近 %d 周', forecastDays: '未来 %d 天的复习量',
@@ -349,7 +310,7 @@ const ZH: Dict = {
 
  statsTitle: '统计', studyDays: '学习天数', streakDays: '连续天数',
   totalAnswers: '总作答', retentionRate: '保持率', masterySpread: '掌握度分布',
-  sectionAll: '全部卡组', sectionBook: '当前课本',
+  sectionAll: '全部牌组', sectionBook: '按牌组',
   studyTime: '最近 7 天学习时长', minutesShort: '分',
   noTimeYet: '这 7 天还没有学习记录',
   noReviewYet: '还没有复习记录', weekdays: '日|一|二|三|四|五|六',
@@ -376,13 +337,12 @@ const EN: Dict = {
 
   appName: 'REPS',
   toLearn: 'To learn', toReview: 'To review', learning: 'Learning',
-  startLearning: 'Learning', change: 'Change', allDecks: 'All decks',
+  startLearning: 'Learning', allDecks: 'All decks',
   noCardsYet: 'No cards yet — import a file first',
   reviewToday: "Review today's cards",
   reviewTodayNone: 'Nothing answered today',
   reviewTodayCount: 'Answered %d today',
   reviewTodayAgainHint: 'Tap to run through today’s cards again',
-  expand: 'Expand', collapse: 'Collapse',
   remain: '%d left', showAnswer: 'Show answer',
   clozeBlanks: 'Cloze · %d blanks',
   setDone: "Today's set is done",
@@ -393,39 +353,31 @@ const EN: Dict = {
   studyMoreEmpty: 'Nothing left for today or tomorrow — rest, or import a new deck',
   backHome: 'Back to deck',
   importing: 'Importing…',
-  nextIn: 'Next in',
 
-  menuSwitchBook: 'Switch book', menuImport: 'Import book', menuGoStudy: 'Go study',
-  newCard: 'New card', cardBrowse: 'Card browse',
-  browseHint: 'preview and edit inside', cardsUnit: 'cards',
-  switchBookTitle: 'Switch book', cardsTitle: 'Cards',
+  
+  cardsUnit: 'cards',
   previewTitle: 'Preview', editCardTitle: 'Edit card', newCardTitle: 'New card',
-  front: 'Front', back: 'Back', preview: 'Preview', edit: 'Edit',
+  front: 'Front', back: 'Back', edit: 'Edit',
   save: 'Save', deleteCard: 'Delete this card',
   confirmDelete: 'Confirm delete', cancelDelete: 'Keep card',
-  deleteDeck: 'Delete', deleteDeckTitle: 'Delete this book?',
+  deleteDeck: 'Delete', deleteDeckTitle: 'Delete this deck?',
   deleteDeckBody: '“%s” and all %d of its cards will be removed, along with their review history.',
   deleteDeckIrreversible: 'The cards themselves are deleted too. This cannot be undone.',
   deletedDeck: 'Deleted “%s”',
-  clearProgress: 'Clear this book’s progress', clearProgressHint: 'cards kept, reset to new',
-  clearConfirmTitle: 'Clear this book’s progress?',
+  clearConfirmTitle: 'Clear this deck’s progress?',
   clearConfirmBody: 'Every card in “%s” (%d in total) goes back to new: scheduling and review '
     + 'history are deleted. No card itself is removed.',
   clearIrreversible: 'This cannot be undone.',
   confirmClear: 'Confirm clear', cancel: 'Cancel',
-  deckDescEmpty: 'No cards yet',
-  deckDesc: '%d cards · %d to review · %d new',
+  
   newCardBadge: 'New', reviewedTimes: 'Reviewed %d times',
   typeQA: 'Q&A', typeChoice: 'Choice', typeCloze: 'Cloze',
   frontPlaceholder: 'Question. {{answer}} is a blank, a ;;; block is multiple choice',
   backPlaceholder: 'Answer or explanation',
-  allDecksNoNew: 'Cannot create under “All decks” — switch to a book from the ⋯ menu',
-  pickBookFirst: 'Switch to a book first',
-  noDeckMix: 'All books together, no separation',
-  handWriteHint: 'Write one by hand; the type follows the content',
+  
+  
 
   meTitle: 'Me',
-  currentStudy: 'Currently studying',
   algoSection: 'Scheduler',
   algoHint: 'Both engines share one review history; switch any time without losing progress.',
   dailySection: "Today's set",
@@ -471,11 +423,9 @@ const EN: Dict = {
   pickHint: 'Pick one', correctMark: 'Correct', wrongMark: 'Wrong',
 
  readFailed: 'Read failed: %s', importedTo: 'Imported %d cards into “%s”',
-  importFailed: 'Import failed: %s', switchedTo: 'Switched to “%s”; the Learn tab follows',
-  switchedAll: 'Switched to all decks',
-  cannotClearAll: 'Cannot clear under “All decks” — switch to a book first',
+  importFailed: 'Import failed: %s', 
+  
   clearedProgress: 'Cleared progress for “%s”; all %d cards are new again',
-  createdCard: 'Card created', savedEdit: 'Changes saved', deletedCard: 'Card deleted',
   saveFailed: 'Save failed: %s', bootFailed: 'Startup failed: %s',
   openingDb: 'Opening the database…',
   answerIs: 'Answer %s', nextAfter: ' · next in %s',
@@ -486,7 +436,7 @@ const EN: Dict = {
 
  statsTitle: 'Stats', studyDays: 'Days studied', streakDays: 'Streak',
   totalAnswers: 'Answers', retentionRate: 'Retention', masterySpread: 'Mastery spread',
-  sectionAll: 'All decks', sectionBook: 'Current book',
+  sectionAll: 'All decks', sectionBook: 'By deck',
   studyTime: 'Study time, last 7 days', minutesShort: 'm',
   noTimeYet: 'No study records in the last 7 days',
   noReviewYet: 'No reviews yet', weekdays: 'S|M|T|W|T|F|S',
