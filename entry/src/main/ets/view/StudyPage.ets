@@ -128,6 +128,23 @@ export struct StudyPage {
 
   private queue: number[] = [];
 
+  /**
+   * 要学的卡组。由外层传入 —— 学习页不再自己去读「当前卡组」。
+   * -1 表示外层还没传(过渡期),退回到全局当前卡组。
+   * **@Watch 必须有**:外层换卡组时 ArkUI 复用实例、只更新 @Prop,不会再调 aboutToAppear。
+   */
+  @Prop @Watch('onDeckChange') deckId: number = -1;
+
+  private scopeDeck(): number {
+    return this.deckId >= 0 ? this.deckId : appStore().currentDeckId;
+  }
+
+  onDeckChange(): void {
+    if (this.stage === Stage.Landing) {
+      this.refresh();
+    }
+  }
+
   aboutToAppear(): void {
     this.refresh();
   }
@@ -165,7 +182,7 @@ export struct StudyPage {
     try {
       const db = st.getDb();
       const now: number = Date.now();
-      const deckId: number = st.currentDeckId;
+      const deckId: number = this.scopeDeck();
       this.totalCards = db.cardCount();
       this.deckLabel = deckId === 0 ? L(this.lang).allDecks : db.deckName(deckId);
 
@@ -230,7 +247,7 @@ export struct StudyPage {
     const st = appStore();
     const db = st.getDb();
     const now: number = Date.now();
-    const deckId: number = st.currentDeckId;
+    const deckId: number = this.scopeDeck();
 
     // 和落地页同一套口径:复习受上限约束,新卡受**当天剩余**额度约束
     const dayFrom: number = dayStart(dayIndex(now));
@@ -1002,7 +1019,7 @@ export struct StudyPage {
     const st = appStore();
     const now: number = Date.now();
     const to: number = dayStart(dayIndex(now) + 2);
-    const ids: number[] = st.getDb().aheadCardIds(st.currentDeckId, now, to, st.aheadCount);
+    const ids: number[] = st.getDb().aheadCardIds(this.scopeDeck(), now, to, st.aheadCount);
     if (ids.length === 0) {
       this.aheadNote = L(this.lang).studyMoreEmpty;
       return;
