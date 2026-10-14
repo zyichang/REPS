@@ -38,6 +38,10 @@ function studyRoutes(name: string, param: Object) {
   }
 }
 
+const EMPTY_DECK: DeckCounts = {
+  id: 0, name: '', cards: 0, newCount: 0, learnCount: 0, dueCount: 0, settled: 0,
+};
+
 /** 三个计数列的宽度。固定宽度才能让各行的数字上下对齐,像 Anki 的表格 */
 const COL_W: number = 56;
 
@@ -185,8 +189,13 @@ export struct StudyTab {
         : which === 0 ? COLOR_NEW : which === 1 ? COLOR_LEARN : COLOR_DUE)
   }
 
+  /** 越界时给空行:删掉一组后,旧下标的行可能先重绘一次才被换掉(见 BrowserTab.rowAt) */
+  private deckAt(i: number): DeckCounts {
+    return i >= 0 && i < this.decks.length ? this.decks[i] : EMPTY_DECK;
+  }
+
   private countOf(i: number, which: number): number {
-    const d: DeckCounts = this.decks[i];
+    const d: DeckCounts = this.deckAt(i);
     return which === 0 ? d.newCount : which === 1 ? d.learnCount : d.dueCount;
   }
 
@@ -203,10 +212,10 @@ export struct StudyTab {
   deckRow(i: number) {
     Row() {
       Column({ space: 2 }) {
-        Text(this.decks[i].name)
+        Text(this.deckAt(i).name)
           .fontSize(16).fontWeight(FontWeight.Medium).fontColor('#1C1C1E')
           .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(`${this.decks[i].cards} ${L(this.lang).cardsUnit}`)
+        Text(`${this.deckAt(i).cards} ${L(this.lang).cardsUnit}`)
           .fontSize(11).fontColor('#8A8A8E')
       }
       .layoutWeight(1).alignItems(HorizontalAlign.Start)

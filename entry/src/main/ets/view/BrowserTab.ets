@@ -31,6 +31,12 @@ const ROUTE_EDIT: string = 'edit';
 const TYPE_TINT: string[] = ['#3B82F6', '#B26BD9', '#10B981'];
 const PREVIEW_MAX: number = 60;
 
+/** 越界时的占位行(见 BrowserTab.rowAt) */
+const EMPTY_ROW: BrowseRow = {
+  cardId: 0, noteId: 0, deckId: 0, deckName: '', type: 0,
+  title: '', front: '', back: '', due: 0, reps: 0,
+};
+
 /** 编辑页的入参。noteId 为 0 表示新建 */
 class EditArgs {
   noteId: number = 0;
@@ -103,7 +109,12 @@ export struct BrowserTab {
   @State private filterDeck: number = 0;
   @State private query: string = '';
   @State private status: string = '';
-  /** 列表上 key 的一部分:每次重查都换,LazyForEach 才会整体重建 */
+  /** 当前过滤条件下一共多少张 —— 「N 张」显示的是它,不是已加载的行数 */
+  @State private total: number = 0;
+  /** 已经加载到第几页(从 0 起)。刷到底时加载 page + 1 */
+  private page: number = 0;
+  private loading: boolean = false;
+  /** 列表上 key 的一部分:每次重查(换过滤 / 搜索)都换,LazyForEach 才会整体重建 */
   private gen: number = 0;
 
   aboutToAppear(): void {
@@ -126,13 +137,39 @@ export struct BrowserTab {
       if (this.filterDeck !== 0 && this.decks.every((d: DeckRow) => d.id !== this.filterDeck)) {
         this.filterDeck = 0;
       }
-      this.rows = db.browse(this.filterDeck, this.query);
+      // 只取第一页。十万张卡的库一次全读进来会卡死(用户要求的分页加载)
+      this.page = 0;
+      this.total = db.browseCount(this.filterDeck, this.query);
+      this.rows = db.browse(this.filterDeck, this.query, st.browsePage, 0);
       this.gen++;
       this.source.setData(this.rows);
       this.status = '';
     } catch (e) {
       this.status = fmt(L(this.lang).readFailed, `${e}`);
       hilog.error(DOMAIN, TAG, '浏览查询失败 %{public}s', `${e}`);
+    }
+  }
+
+  /** 刷到底:加载下一页,追加到列表末尾。已加载完或正在加载就什么都不做 */
+  private loadMore(): void {
+    if (this.loading || this.rows.length >= this.total) {
+      return;
+    }
+    this.loading = true;
+    try {
+      const st = appStore();
+      const more: BrowseRow[] = st.getDb().browse(this.filterDeck, this.query, st.browsePage, this.page + 1);
+      if (more.length > 0) {
+        this.page++;
+        this.rows = this.rows.concat(more);
+        this.source.append(more);
+      }
+      hilog.info(DOMAIN, TAG, '浏览加载第 %{public}d 页,已加载 %{public}d / %{public}d',
+        this.page, this.rows.length, this.total);
+    } catch (e) {
+      this.status = fmt(L(this.lang).readFailed, `${e}`);
+    } finally {
+      this.loading = false;
     }
   }
 
@@ -168,36 +205,47 @@ export struct BrowserTab {
     this.stack.pushPath({ name: ROUTE_EDIT, param: new EditArgs(0, deck, '', '') });
   }
 
+  /**
+   * 第 i 行的数据。**越界时给一个空行,不要直接 this.rows[i]。**
+   *
+   * 重查(换语言、换过滤、作答后 bump)会把 rows 重置成第一页,而已经建好的
+   * 第 260 行之类会**先**因为 lang 等状态变化重绘一次,再被 LazyForEach 换掉 ——
+   * 那一下 this.rows[i] 是 undefined,读 .type 直接 JS 崩溃(实测:滑到底后切语言闪退)。
+   */
+  private rowAt(i: number): BrowseRow {
+    return i >= 0 && i < this.rows.length ? this.rows[i] : EMPTY_ROW;
+  }
+
   /** 一行。**只接常量下标** */
   @Builder
   row(i: number) {
     Column({ space: 6 }) {
       Row({ space: 8 }) {
-        Text(typeLabelOf(this.lang, this.rows[i].type))
+        Text(typeLabelOf(this.lang, this.rowAt(i).type))
           .fontSize(11).fontColor(Color.White)
-          .backgroundColor(TYPE_TINT[typeIdx(this.rows[i].type)])
+          .backgroundColor(TYPE_TINT[typeIdx(this.rowAt(i).type)])
           .borderRadius(4).padding({ left: 6, right: 6, top: 1, bottom: 1 })
-        Text(this.rows[i].deckName)
+        Text(this.rowAt(i).deckName)
           .fontSize(11).fontColor('#8A8A8E').layoutWeight(1)
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(dueLabelOf(this.lang, this.rows[i].due, this.rows[i].reps, Date.now()))
+        Text(dueLabelOf(this.lang, this.rowAt(i).due, this.rowAt(i).reps, Date.now()))
           .fontSize(11)
-          .fontColor(this.rows[i].reps === 0 ? '#3B82F6' : '#8A8A8E')
+          .fontColor(this.rowAt(i).reps === 0 ? '#3B82F6' : '#8A8A8E')
       }
       .width('100%')
 
-      Text(oneLine(this.rows[i].title, this.rows[i].front))
+      Text(oneLine(this.rowAt(i).title, this.rowAt(i).front))
         .fontSize(15).fontColor('#1C1C1E')
         .width('100%').maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
 
-      if (this.rows[i].reps > 0) {
-        Text(fmt(L(this.lang).reviewedTimes, this.rows[i].reps))
+      if (this.rowAt(i).reps > 0) {
+        Text(fmt(L(this.lang).reviewedTimes, this.rowAt(i).reps))
           .fontSize(11).fontColor('#B0B7C3').width('100%')
       }
     }
     .width('100%').padding(12)
     .backgroundColor(Color.White).borderRadius(10)
-    .onClick(() => this.stack.pushPath({ name: ROUTE_PREVIEW, param: this.rows[i] }))
+    .onClick(() => this.stack.pushPath({ name: ROUTE_PREVIEW, param: this.rowAt(i) }))
   }
 
   @Builder
@@ -234,7 +282,7 @@ export struct BrowserTab {
       }
       .width('90%').margin({ bottom: 8 })
 
-      Text(this.status.length > 0 ? this.status : fmt(L(this.lang).matchCount, this.rows.length))
+      Text(this.status.length > 0 ? this.status : fmt(L(this.lang).matchCount, this.total))
         .fontSize(11).fontColor('#8A8A8E').width('90%').margin({ bottom: 6 })
 
       if (this.rows.length === 0) {
@@ -253,6 +301,8 @@ export struct BrowserTab {
         .cachedCount(6)
         .layoutWeight(1).width('90%')
         .scrollBar(BarState.Auto)
+        // 滑到最后一行就加载下一批(每批张数在「高级设置 → 浏览」里)
+        .onReachEnd(() => this.loadMore())
       }
     }
     .width('100%').height('100%').backgroundColor('#F2F2F7')

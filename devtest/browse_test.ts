@@ -7,7 +7,7 @@
  *   3. 中文子串能搜到(SQLite 的 LIKE 对非 ASCII 只做精确匹配,子串本身没问题)
  */
 import { DatabaseSync } from 'node:sqlite';
-import { DDL, SQL_BROWSE, browseArgs, escapeLike } from './Schema';
+import { DDL, SQL_BROWSE, SQL_BROWSE_COUNT, browseArgs, browseCountArgs, escapeLike } from './Schema';
 
 let pass = 0;
 let fail = 0;
@@ -47,7 +47,13 @@ add(2, 'pathXCtemp', '无');
 
 interface Row { card_id: number; deck_name: string; front: string }
 function q(deck: number, text: string): Row[] {
-  return db.prepare(SQL_BROWSE).all(...browseArgs(deck, text)) as Row[];
+  // 一页取足够大,等价于不分页;分页本身在第 5 节测
+  const rows = db.prepare(SQL_BROWSE).all(...browseArgs(deck, text, 1000, 0)) as Row[];
+  const n = (db.prepare(SQL_BROWSE_COUNT).get(...browseCountArgs(deck, text)) as { n: number }).n;
+  if (n !== rows.length) {
+    check(`计数与列表一致 deck=${deck} q=${text}`, false, `${n} vs ${rows.length}`);
+  }
+  return rows;
 }
 
 console.log('=== 1. 卡组过滤 ===');
@@ -77,6 +83,33 @@ console.log('\n=== 4. 过滤与搜索组合 ===');
 check('Words 里搜「增长率」:0', q(2, '增长率').length === 0);
 check('Math 里搜「增长率」:2', q(1, '增长率').length === 2);
 check('全部里搜「下划线」:2(两张背面都含)', q(0, '下划线').length === 2);
+
+console.log('\n=== 5. 分页:逐页拼起来 = 一次全取,不重不漏 ===');
+for (let i = 0; i < 123; i++) {
+  add(i % 2 === 0 ? 1 : 2, `bulk ${i}`, `b${i}`);
+}
+for (const [deck, text] of [[0, ''], [1, ''], [0, 'bulk'], [2, 'bulk']] as Array<[number, string]>) {
+  const all = db.prepare(SQL_BROWSE).all(...browseArgs(deck, text, 100000, 0)) as Row[];
+  const total = (db.prepare(SQL_BROWSE_COUNT).get(...browseCountArgs(deck, text)) as { n: number }).n;
+  for (const size of [50, 7]) {
+    const got: number[] = [];
+    let page = 0;
+    let pages = 0;
+    for (;;) {
+      const part = db.prepare(SQL_BROWSE).all(...browseArgs(deck, text, size, page)) as Row[];
+      if (part.length === 0) { break; }
+      check(`deck=${deck} q=${text} 页大小 ${size} 第 ${page} 页不超过页大小`, part.length <= size);
+      got.push(...part.map((r) => r.card_id));
+      pages++;
+      page++;
+    }
+    check(`deck=${deck} q="${text}" 页大小 ${size}:${pages} 页拼起来 = 全量 ${all.length}`,
+      got.join(',') === all.map((r) => r.card_id).join(','), `${got.length}`);
+    check(`deck=${deck} q="${text}" 页数 = ceil(总数 / 页大小)`, pages === Math.ceil(total / size), `${pages}`);
+  }
+}
+check('页大小 <= 0 时退回 50', (browseArgs(0, '', 0, 2)[6] as number) === 50
+  && (browseArgs(0, '', 0, 2)[7] as number) === 100);
 
 db.close();
 console.log(`\n===== 结果: ${pass} 通过 / ${fail} 失败 =====`);

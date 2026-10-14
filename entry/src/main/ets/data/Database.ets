@@ -16,7 +16,7 @@ import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { CardState, NoteType, ReviewLog } from '../model/Models';
 import {
-  BrowseRow, CardBrief, DDL, DayStat, SQL_BROWSE, browseArgs, DeckCountRow, DeckCounts, DeckRow, LogPoint, SQL_DECK_COUNTS,
+  BrowseRow, CardBrief, DDL, DayStat, SQL_BROWSE, SQL_BROWSE_COUNT, browseArgs, browseCountArgs, DeckCountRow, DeckCounts, DeckRow, LogPoint, SQL_DECK_COUNTS,
   applyDeckLimits, dayIndex, dayStart, MIGRATE_FLATTEN_DECKS, ReviewCardRow,
   ReviewedCard, SQL_AHEAD_CARDS, SQL_AHEAD_CARDS_IN_DECK, SQL_COUNT_CARDS,
   SQL_COUNT_CARDS_IN_DECK, SQL_COUNT_DUE, SQL_COUNT_DUE_IN_DECK, SQL_COUNT_NEW,
@@ -377,10 +377,18 @@ export class Database {
     return out;
   }
 
-  /** 浏览器:按卡组(0 = 全部)过滤 + 子串搜索。搜索词的转义在 browseArgs 里 */
-  browse(deckId: number, query: string): BrowseRow[] {
+  /** 浏览器的总数(同一过滤条件) */
+  browseCount(deckId: number, query: string): number {
+    return this.scalar(SQL_BROWSE_COUNT, browseCountArgs(deckId, query) as Array<relationalStore.ValueType>);
+  }
+
+  /**
+   * 浏览器的一页:按卡组(0 = 全部)过滤 + 子串搜索,第 page 页(从 0 起)。
+   * 搜索词的转义在 browseArgs 里。
+   */
+  browse(deckId: number, query: string, pageSize: number, page: number): BrowseRow[] {
     const rs = this.db().querySqlSync(SQL_BROWSE,
-      browseArgs(deckId, query) as Array<relationalStore.ValueType>);
+      browseArgs(deckId, query, pageSize, page) as Array<relationalStore.ValueType>);
     const out: BrowseRow[] = [];
     try {
       while (rs.goToNextRow()) {

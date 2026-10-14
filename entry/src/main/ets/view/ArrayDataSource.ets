@@ -5,8 +5,8 @@
  * 1000 张卡,打开卡片列表要先建 1000 个 ListItem 才出第一帧。
  * LazyForEach 只建屏幕内(加 cachedCount 预取)的那几十行。
  *
- * 只支持整体替换(setData)。REPS 的列表每次都是从数据库整页重读,
- * 没有逐行增删的场景,不值得为它维护细粒度通知。
+ * 支持整体替换(setData)和末尾追加(append,分页用)。没有逐行增删的场景,
+ * 不值得为它维护更细的通知。
  */
 export class ArrayDataSource<T> implements IDataSource {
   private data: T[] = [];
@@ -33,11 +33,30 @@ export class ArrayDataSource<T> implements IDataSource {
     }
   }
 
+  /**
+   * 在末尾追加一批(分页加载下一页)。只通知「新增了这一段」,
+   * 已经建好的行原样保留,滚动位置不会跳。
+   */
+  append(more: T[]): void {
+    if (more.length === 0) {
+      return;
+    }
+    const start: number = this.data.length;
+    this.data = this.data.concat(more);
+    this.listeners.forEach((l: DataChangeListener) => {
+      l.onDatasetChange([{ type: DataOperationType.ADD, index: start, count: more.length }]);
+    });
+  }
+
   /** 整体替换并让列表重载。调用方仍要保证 key 稳定(用卡片 id,不用下标) */
   setData(data: T[]): void {
     this.data = data;
+    // **全部走 onDatasetChange,不要混用 onDataReloaded。** ArkUI 规定一个数据源
+    // 一旦用过 onDatasetChange(append 里用了),再调旧接口就抛
+    // 「onDatasetChange cannot be used with other interface」—— 实测:分页加载过之后
+    // 再搜索 / 换过滤,列表就报「读取失败」
     this.listeners.forEach((l: DataChangeListener) => {
-      l.onDataReloaded();
+      l.onDatasetChange([{ type: DataOperationType.RELOAD }]);
     });
   }
 }

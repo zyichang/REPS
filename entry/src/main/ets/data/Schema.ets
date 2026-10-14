@@ -762,7 +762,11 @@ export const SQL_COUNT_NEW: string =
  *
  * 搜索词**必须先过 escapeLike()** 再包上 `%…%`:用户输入里的 `%` 和 `_`
  * 在 LIKE 里是通配符,不转义的话搜「100%」会把所有含「100」的卡都搜出来。
- * 参数:卡组、卡组、搜索词、模式、模式、模式。搜索词为空串时不过滤。
+ * **分页**:一次只取一页(LIMIT ? OFFSET ?),刷到底再取下一页 ——
+ * 十万张卡的库不能一次全读进来。排序必须是全序(最后落到 c.id),
+ * 否则相邻两页之间可能重复或漏卡。
+ *
+ * 参数:卡组、卡组、搜索词、模式、模式、模式、页大小、偏移。搜索词为空串时不过滤。
  *
  * 注意 ESCAPE 子句:源码里写 `'\\'`,模板字符串求值后才是 SQL 里的 `'\'`。
  */
@@ -778,7 +782,18 @@ export const SQL_BROWSE: string =
       AND (? = '' OR n.front LIKE ? ESCAPE '\\'
                   OR n.back  LIKE ? ESCAPE '\\'
                   OR n.title LIKE ? ESCAPE '\\')
-    ORDER BY d.name, n.id, c.ordinal`;
+    ORDER BY d.name, n.id, c.ordinal, c.id
+    LIMIT ? OFFSET ?`;
+
+/** 与 SQL_BROWSE 同一个过滤条件下的总数(列表上方的「N 张」)。列名必须叫 n */
+export const SQL_BROWSE_COUNT: string =
+  `SELECT COUNT(*) AS n
+     FROM cards c
+     JOIN notes n ON n.id = c.note_id
+    WHERE (? = 0 OR n.deck_id = ?)
+      AND (? = '' OR n.front LIKE ? ESCAPE '\\'
+                  OR n.back  LIKE ? ESCAPE '\\'
+                  OR n.title LIKE ? ESCAPE '\\')`;
 
 /** 把用户输入转成 LIKE 的字面量:转义 \ % _。只做这一件事,包 %…% 由调用方决定 */
 export function escapeLike(raw: string): string {
@@ -793,11 +808,17 @@ export function escapeLike(raw: string): string {
   return out;
 }
 
-/** SQL_BROWSE 的参数。query 是用户原始输入,这里负责 trim + 转义 */
-export function browseArgs(deckId: number, query: string): Array<number | string> {
+/** SQL_BROWSE_COUNT 的参数。query 是用户原始输入,这里负责 trim + 转义 */
+export function browseCountArgs(deckId: number, query: string): Array<number | string> {
   const q: string = query.trim();
   const pat: string = q.length === 0 ? '' : `%${escapeLike(q)}%`;
   return [deckId, deckId, q, pat, pat, pat];
+}
+
+/** SQL_BROWSE 的参数:过滤条件 + 第几页。page 从 0 起 */
+export function browseArgs(deckId: number, query: string, pageSize: number, page: number): Array<number | string> {
+  const size: number = pageSize > 0 ? pageSize : 50;
+  return browseCountArgs(deckId, query).concat([size, page * size]);
 }
 
 /** 浏览器的一行。比 CardBrief 多了它在哪个卡组 */
