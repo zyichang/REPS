@@ -99,6 +99,7 @@ const suites = [
   'steps_test.ts',
   'stats_test.ts',
   'deckcounts_test.ts',
+  'browse_test.ts',
 ];
 
 for (const suite of suites) {

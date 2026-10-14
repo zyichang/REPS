@@ -16,7 +16,7 @@ import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { CardState, NoteType, ReviewLog } from '../model/Models';
 import {
-  CardBrief, DDL, DayStat, DeckCountRow, DeckCounts, DeckRow, LogPoint, SQL_DECK_COUNTS,
+  BrowseRow, CardBrief, DDL, DayStat, SQL_BROWSE, browseArgs, DeckCountRow, DeckCounts, DeckRow, LogPoint, SQL_DECK_COUNTS,
   applyDeckLimits, dayIndex, dayStart, MIGRATE_FLATTEN_DECKS, ReviewCardRow,
   ReviewedCard, SQL_AHEAD_CARDS, SQL_AHEAD_CARDS_IN_DECK, SQL_COUNT_CARDS,
   SQL_COUNT_CARDS_IN_DECK, SQL_COUNT_DUE, SQL_COUNT_DUE_IN_DECK, SQL_COUNT_NEW,
@@ -352,6 +352,32 @@ export class Database {
           settled: rs.getLong(rs.getColumnIndex('settled')),
         };
         out.push(applyDeckLimits(row, newPerDay, reviewLimit));
+      }
+    } finally {
+      rs.close();
+    }
+    return out;
+  }
+
+  /** 浏览器:按卡组(0 = 全部)过滤 + 子串搜索。搜索词的转义在 browseArgs 里 */
+  browse(deckId: number, query: string): BrowseRow[] {
+    const rs = this.db().querySqlSync(SQL_BROWSE,
+      browseArgs(deckId, query) as Array<relationalStore.ValueType>);
+    const out: BrowseRow[] = [];
+    try {
+      while (rs.goToNextRow()) {
+        out.push({
+          cardId: rs.getLong(rs.getColumnIndex('card_id')),
+          noteId: rs.getLong(rs.getColumnIndex('note_id')),
+          deckId: rs.getLong(rs.getColumnIndex('deck_id')),
+          deckName: rs.getString(rs.getColumnIndex('deck_name')),
+          type: rs.getLong(rs.getColumnIndex('type')),
+          title: rs.getString(rs.getColumnIndex('title')),
+          front: rs.getString(rs.getColumnIndex('front')),
+          back: rs.getString(rs.getColumnIndex('back')),
+          due: rs.getLong(rs.getColumnIndex('due')),
+          reps: rs.getLong(rs.getColumnIndex('reps')),
+        });
       }
     } finally {
       rs.close();

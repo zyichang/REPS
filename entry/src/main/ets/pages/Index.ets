@@ -15,7 +15,7 @@ import {
   SK_BACK_REQ, SK_CAN_BACK, SK_GOTO_TAB, SK_IMMERSIVE, SK_LANG, appStore,
 } from '../store/AppStore';
 import { L, LANG_ZH, fmt } from '../i18n/Strings';
-import { GlossaryPage } from '../view/GlossaryPage';
+import { BrowserTab } from '../view/BrowserTab';
 import { ProfilePage } from '../view/ProfilePage';
 import { StatsPage } from '../view/StatsPage';
 import { StudyTab } from '../view/StudyTab';
@@ -213,7 +213,7 @@ struct Index {
           }.tabBar(this.tabItem(1))
 
           TabContent() {
-            GlossaryPage()
+            BrowserTab()
           }.tabBar(this.tabItem(2))
 
           TabContent() {

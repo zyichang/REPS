@@ -1,6 +1,6 @@
 import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { window } from '@kit.ArkUI';
+import { KeyboardAvoidMode, window } from '@kit.ArkUI';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'REPS';
@@ -23,6 +23,13 @@ export default class EntryAbility extends UIAbility {
         return;
       }
       hilog.info(DOMAIN, TAG, '首页加载完成');
+      // 键盘弹出时**压缩**页面而不是整体上推:编辑卡片时「保存」按钮原来会被键盘盖住,
+      // 必须先收起键盘才点得到。RESIZE 下页面变矮,Scroll 里的按钮滚一下就能点
+      try {
+        windowStage.getMainWindowSync().getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+      } catch (e) {
+        hilog.error(DOMAIN, TAG, '设置键盘避让失败: %{public}s', `${e}`);
+      }
     });
   }
 

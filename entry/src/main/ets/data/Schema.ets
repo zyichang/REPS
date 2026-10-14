@@ -701,6 +701,66 @@ export const SQL_COUNT_NEW: string =
      LEFT JOIN scheduling s ON s.card_id = c.id
     WHERE s.card_id IS NULL`;
 
+// ---------------------------------------------------------------- 浏览器(Anki Browse)
+
+/**
+ * 浏览器的查询:按卡组过滤(0 = 全部)+ 在正面 / 背面 / 标题里搜一个子串。
+ *
+ * 搜索词**必须先过 escapeLike()** 再包上 `%…%`:用户输入里的 `%` 和 `_`
+ * 在 LIKE 里是通配符,不转义的话搜「100%」会把所有含「100」的卡都搜出来。
+ * 参数:卡组、卡组、搜索词、模式、模式、模式。搜索词为空串时不过滤。
+ *
+ * 注意 ESCAPE 子句:源码里写 `'\\'`,模板字符串求值后才是 SQL 里的 `'\'`。
+ */
+export const SQL_BROWSE: string =
+  `SELECT c.id AS card_id, n.id AS note_id, n.deck_id, d.name AS deck_name,
+          n.type, n.title, n.front, n.back,
+          COALESCE(s.due, 0) AS due, COALESCE(s.reps, 0) AS reps
+     FROM cards c
+     JOIN notes n ON n.id = c.note_id
+     JOIN decks d ON d.id = n.deck_id
+     LEFT JOIN scheduling s ON s.card_id = c.id
+    WHERE (? = 0 OR n.deck_id = ?)
+      AND (? = '' OR n.front LIKE ? ESCAPE '\\'
+                  OR n.back  LIKE ? ESCAPE '\\'
+                  OR n.title LIKE ? ESCAPE '\\')
+    ORDER BY d.name, n.id, c.ordinal`;
+
+/** 把用户输入转成 LIKE 的字面量:转义 \ % _。只做这一件事,包 %…% 由调用方决定 */
+export function escapeLike(raw: string): string {
+  let out: string = '';
+  for (let i = 0; i < raw.length; i++) {
+    const ch: string = raw.charAt(i);
+    if (ch === '\\' || ch === '%' || ch === '_') {
+      out += '\\';
+    }
+    out += ch;
+  }
+  return out;
+}
+
+/** SQL_BROWSE 的参数。query 是用户原始输入,这里负责 trim + 转义 */
+export function browseArgs(deckId: number, query: string): Array<number | string> {
+  const q: string = query.trim();
+  const pat: string = q.length === 0 ? '' : `%${escapeLike(q)}%`;
+  return [deckId, deckId, q, pat, pat, pat];
+}
+
+/** 浏览器的一行。比 CardBrief 多了它在哪个卡组 */
+export interface BrowseRow {
+  cardId: number;
+  noteId: number;
+  deckId: number;
+  deckName: string;
+  type: number;
+  title: string;
+  front: string;
+  back: string;
+  /** 下次到期毫秒。0 表示从没学过 */
+  due: number;
+  reps: number;
+}
+
 /** 卡组一览里的一行 */
 export interface DeckRow {
   id: number;

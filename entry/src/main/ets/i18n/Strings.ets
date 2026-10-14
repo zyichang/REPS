@@ -28,6 +28,14 @@ export interface Dict {
   colLearn: string;
   colDue: string;
   importDeck: string;
+  browseTitle: string;
+  searchHint: string;
+  noMatch: string;
+  dueNow: string;
+  dueOn: string;                 // %s 日期
+  putInDeck: string;
+  needDeckFirst: string;
+  matchCount: string;            // %d
   deckActions: string;
   actClear: string;
   actDelete: string;
@@ -226,12 +234,15 @@ export interface Dict {
 }
 
 const ZH: Dict = {
-  tabStudy: '学习', tabStats: '统计', tabGlossary: '词卡表', tabMe: '我的',
+  tabStudy: '学习', tabStats: '统计', tabGlossary: '浏览', tabMe: '我的',
 
   deckListTitle: '牌组',
   deckListEmpty: '还没有牌组 —— 导入一个 Markdown 或 YAML 文件就能开始',
   colNew: '新', colLearn: '学习中', colDue: '待复习',
-  importDeck: '导入牌组', deckActions: '牌组操作',
+  importDeck: '导入牌组',
+  browseTitle: '浏览', searchHint: '搜索正面、背面或标题', noMatch: '没有匹配的卡片',
+  dueNow: '已到期', dueOn: '%s 到期', putInDeck: '放进牌组',
+  needDeckFirst: '还没有牌组 —— 先在学习页导入一个', matchCount: '%d 张', deckActions: '牌组操作',
   actClear: '清空进度(卡片保留)', actDelete: '删除牌组',
 
   appName: '刻意重复',
@@ -352,12 +363,15 @@ const ZH: Dict = {
 };
 
 const EN: Dict = {
-  tabStudy: 'Learn', tabStats: 'Stats', tabGlossary: 'Glossary', tabMe: 'Me',
+  tabStudy: 'Learn', tabStats: 'Stats', tabGlossary: 'Browse', tabMe: 'Me',
 
   deckListTitle: 'Decks',
   deckListEmpty: 'No decks yet — import a Markdown or YAML file to start',
   colNew: 'New', colLearn: 'Learn', colDue: 'Due',
-  importDeck: 'Import deck', deckActions: 'Deck actions',
+  importDeck: 'Import deck',
+  browseTitle: 'Browse', searchHint: 'Search front, back or title', noMatch: 'No matching cards',
+  dueNow: 'Due', dueOn: 'Due %s', putInDeck: 'Deck',
+  needDeckFirst: 'No decks yet — import one on the Study tab', matchCount: '%d cards', deckActions: 'Deck actions',
   actClear: 'Clear progress (keep cards)', actDelete: 'Delete deck',
 
   appName: 'REPS',
