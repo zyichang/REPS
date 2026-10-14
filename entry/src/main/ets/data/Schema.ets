@@ -711,6 +711,83 @@ export interface DeckRow {
 }
 
 /**
+ * 牌组列表(Anki 式主界面)的原始计数:**一条 SQL 给出所有卡组**,还没套上限。
+ *
+ * 每一列都和落地页那几条单卡组查询同口径 —— 测试逐列对拍:
+ *   unlearned     = SQL_UNLEARNED_COUNT(不设上限)
+ *   untouchedDue  = SQL_UNTOUCHED_DUE(不设上限):今日截止前到期、今天还没答过
+ *   newToday      = SQL_NEW_INTRODUCED_TODAY:今天第一次见的卡
+ *   again/settled = SQL_TODAY_PROGRESS 的灰 / 绿
+ *
+ * 参数顺序:今日截止、今日起点、今日起点、今日起点、今日截止、今日起点、今日截止。
+ * 一律无编号 `?`(编号占位符在 node:sqlite 上不可靠,见 SQL_TODAY_PROGRESS)。
+ */
+export const SQL_DECK_COUNTS: string =
+  `SELECT d.id, d.name,
+          COUNT(c.id) AS cards,
+          SUM(CASE WHEN s.card_id IS NULL THEN 1 ELSE 0 END) AS unlearned,
+          SUM(CASE WHEN s.card_id IS NOT NULL AND s.due < ? AND s.last_review < ?
+                   THEN 1 ELSE 0 END) AS untouched_due,
+          SUM(CASE WHEN s.card_id IS NOT NULL AND s.first_seen >= ?
+                   THEN 1 ELSE 0 END) AS new_today,
+          SUM(CASE WHEN s.card_id IS NOT NULL AND s.last_review >= ? AND s.due < ?
+                   THEN 1 ELSE 0 END) AS again,
+          SUM(CASE WHEN s.card_id IS NOT NULL AND s.last_review >= ? AND s.due >= ?
+                   THEN 1 ELSE 0 END) AS settled
+     FROM decks d
+     JOIN notes n ON n.deck_id = d.id
+     JOIN cards c ON c.note_id = n.id
+     LEFT JOIN scheduling s ON s.card_id = c.id
+    GROUP BY d.id
+    HAVING cards > 0
+    ORDER BY d.name ASC`;
+
+/** SQL_DECK_COUNTS 的一行 */
+export interface DeckCountRow {
+  id: number;
+  name: string;
+  cards: number;
+  unlearned: number;
+  untouchedDue: number;
+  newToday: number;
+  again: number;
+  settled: number;
+}
+
+/** 牌组列表上显示的一行:已经按每日上限截过 */
+export interface DeckCounts {
+  id: number;
+  name: string;
+  cards: number;
+  /** 待学习:今天还能引入的新卡 */
+  newCount: number;
+  /** 学习中:今天答过、今天还会回来 */
+  learnCount: number;
+  /** 待复习:今天到期、今天还没答过 */
+  dueCount: number;
+  /** 今天已学完(三段条的绿) */
+  settled: number;
+}
+
+/**
+ * 套上每日上限。**上限对每个卡组各算一份**(Anki 默认预设的行为):
+ * 新卡额度 20 时,两个卡组各自能出 20 张,而不是合起来 20 张。
+ * 新卡剩余额度 = 额度 − 本组今天已引入,和落地页的算法一字不差。
+ */
+export function applyDeckLimits(r: DeckCountRow, newPerDay: number, reviewLimit: number): DeckCounts {
+  const leftNew: number = newPerDay > r.newToday ? newPerDay - r.newToday : 0;
+  return {
+    id: r.id,
+    name: r.name,
+    cards: r.cards,
+    newCount: Math.min(r.unlearned, leftNew),
+    learnCount: r.again,
+    dueCount: Math.min(r.untouchedDue, reviewLimit < 0 ? 0 : reviewLimit),
+    settled: r.settled,
+  };
+}
+
+/**
  * 卡组浏览列表的一行。front / back 是原文,截断交给界面 ——
  * 数据层不做展示决定。
  */

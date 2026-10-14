@@ -16,7 +16,8 @@ import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { CardState, NoteType, ReviewLog } from '../model/Models';
 import {
-  CardBrief, DDL, DayStat, DeckRow, LogPoint, MIGRATE_FLATTEN_DECKS, ReviewCardRow,
+  CardBrief, DDL, DayStat, DeckCountRow, DeckCounts, DeckRow, LogPoint, SQL_DECK_COUNTS,
+  applyDeckLimits, dayIndex, dayStart, MIGRATE_FLATTEN_DECKS, ReviewCardRow,
   ReviewedCard, SQL_AHEAD_CARDS, SQL_AHEAD_CARDS_IN_DECK, SQL_COUNT_CARDS,
   SQL_COUNT_CARDS_IN_DECK, SQL_COUNT_DUE, SQL_COUNT_DUE_IN_DECK, SQL_COUNT_NEW,
   SQL_COUNT_NEW_IN_DECK, SQL_DAY_STATS, SQL_DECK_NOTE_COUNT,
@@ -320,6 +321,37 @@ export class Database {
           due: rs.getLong(rs.getColumnIndex('due')),
           fresh: rs.getLong(rs.getColumnIndex('fresh')),
         });
+      }
+    } finally {
+      rs.close();
+    }
+    return out;
+  }
+
+  /**
+   * 牌组列表的计数:一条 SQL 拿全部卡组的原始数,再按每日上限逐组截断。
+   * 口径与学习页落地页完全一致(见 Schema.SQL_DECK_COUNTS)。
+   */
+  deckCounts(now: number, newPerDay: number, reviewLimit: number): DeckCounts[] {
+    const today: number = dayIndex(now);
+    const dayFrom: number = dayStart(today);
+    const dayTo: number = dayStart(today + 1);
+    const rs = this.db().querySqlSync(SQL_DECK_COUNTS,
+      [dayTo, dayFrom, dayFrom, dayFrom, dayTo, dayFrom, dayTo] as Array<relationalStore.ValueType>);
+    const out: DeckCounts[] = [];
+    try {
+      while (rs.goToNextRow()) {
+        const row: DeckCountRow = {
+          id: rs.getLong(rs.getColumnIndex('id')),
+          name: rs.getString(rs.getColumnIndex('name')),
+          cards: rs.getLong(rs.getColumnIndex('cards')),
+          unlearned: rs.getLong(rs.getColumnIndex('unlearned')),
+          untouchedDue: rs.getLong(rs.getColumnIndex('untouched_due')),
+          newToday: rs.getLong(rs.getColumnIndex('new_today')),
+          again: rs.getLong(rs.getColumnIndex('again')),
+          settled: rs.getLong(rs.getColumnIndex('settled')),
+        };
+        out.push(applyDeckLimits(row, newPerDay, reviewLimit));
       }
     } finally {
       rs.close();
