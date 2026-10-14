@@ -34,6 +34,8 @@ function tabLabel(lang: string, i: number): string {
 const ACTIVE: string = '#3B82F6';
 const INACTIVE: string = '#B0B7C3';
 const ICON_BOX: number = 22;
+/** 标签栏高度。文字只在选中项出现、不再给隐藏的文字留位,所以从 56 压到 46 */
+const BAR_H: number = 46;
 
 @Entry
 @Component
@@ -83,6 +85,13 @@ struct Index {
       this.bootError = fmt(L(this.lang).bootFailed, `${e}`);
       hilog.error(DOMAIN, TAG, '启动失败 %{public}s', String(e));
     }
+  }
+
+  /** 「我的」图标的肩膀:宽 16vp、高 8vp 的半圆弧,画在 18x10vp 的画布里 */
+  private shoulderPath(): string {
+    const ctx = this.getUIContext();
+    const p = (v: number): number => Math.round(ctx.vp2px(v) * 10) / 10;
+    return `M${p(1)} ${p(9)} A${p(8)} ${p(8)} 0 0 1 ${p(17)} ${p(9)}`;
   }
 
   private tint(i: number): string {
@@ -140,8 +149,11 @@ struct Index {
       Circle({ width: 8, height: 8 })
         .stroke(this.tint(i)).strokeWidth(1.6).fill(Color.Transparent)
         .offset({ y: -5 })
+      // **Path 的 commands 单位是 px,不是 vp。** 原来写的 'M0 8 A8 8 0 0 1 16 8' 在高密度屏上
+      // 只有几个 vp 大,肩膀那条弧缩在角落里、还被裁掉一半。按 vp 设计,再换算成 px
       Path()
-        .commands('M0 8 A8 8 0 0 1 16 8')
+        .width(18).height(10)
+        .commands(this.shoulderPath())
         .stroke(this.tint(i)).strokeWidth(1.6).fill(Color.Transparent)
         .offset({ y: 6 })
     }
@@ -151,10 +163,10 @@ struct Index {
   /**
    * 标签项。只接常量下标 —— 文字与颜色都在内部从 @State 算。
    *
-   * 文字**只在选中时出现**。用 Visibility.Hidden 而不是 None:
-   * Hidden 仍然占位,所以切换标签时图标不会上下跳动;None 会让整行重新布局。
-   * 文字隐藏后无障碍读屏拿不到标签,因此把标签挂到整项的 accessibilityText 上,
-   * 无论选中与否都念得出来。
+   * 文字**只在选中时出现**,而且**真的不占位**(if,不是 Visibility.Hidden):
+   * 图标 + 文字当成一个整体在栏里上下居中;没选中的只有图标,也居中。
+   * 不再为隐藏的文字留空,标签栏就能压矮,内容区多出一截。
+   * 文字不在时读屏拿不到标签,所以标签挂在整项的 accessibilityText 上。
    */
   @Builder
   tabItem(i: number) {
@@ -168,10 +180,11 @@ struct Index {
       } else {
         this.iconProfile(3)
       }
-      Text(tabLabel(this.lang, i))
-        .fontSize(10)
-        .fontColor(this.tint(i))
-        .visibility(this.current === i ? Visibility.Visible : Visibility.Hidden)
+      if (this.current === i) {
+        Text(tabLabel(this.lang, i))
+          .fontSize(10)
+          .fontColor(this.tint(i))
+      }
     }
     .width('100%').height('100%').justifyContent(FlexAlign.Center)
     .accessibilityText(tabLabel(this.lang, i))
@@ -214,7 +227,7 @@ struct Index {
         }
         .barMode(BarMode.Fixed)
         .onChange((index: number) => { this.current = index; })
-        .barHeight(this.immersive ? 0 : 56)
+        .barHeight(this.immersive ? 0 : BAR_H)
         // **藏起标签栏不等于锁住手势。** Tabs 默认可以左右滑动切页,
         // 作答中一划就跳走,计时和专注都被打断 —— 所以沉浸时把滑动也关掉。
         .scrollable(!this.immersive)

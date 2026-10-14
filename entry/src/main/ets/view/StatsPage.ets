@@ -19,7 +19,10 @@
  * 所以 day 的含义与 dayIndex()、与学习页的「今天」仍是同一个定义。
  */
 
-import { DayStat, DeckRow, dayAnchor, dayIndex, heatCells } from '../data/Schema';
+import {
+  DayStat, DeckRow, calendarCells, calendarDate, checkinStreak, dayAnchor, dayIndex, heatCells,
+  weekdaySun0,
+} from '../data/Schema';
 import { MASTERY_COLOR } from '../model/Models';
 import { masteryOf } from '../srs/Srs';
 import { SK_LANG, SK_TICK, appStore } from '../store/AppStore';
@@ -52,6 +55,14 @@ export struct StatsPage {
   @State private totalReps: number = 0;
   @State private retention: number = 0;
   @State private studiedDays: number = 0;
+  /** 打卡月历:正在看的年 / 月(0~11),格子的日序号,打过卡的日子 */
+  @State private calYear: number = new Date().getFullYear();
+  @State private calMonth: number = new Date().getMonth();
+  @State private calCells: number[] = [];
+  /** 不是 @State(Set 不可观察),所以每次重读都递增 calGen,月历行的 key 带上它才会重建 */
+  private checkins: Set<number> = new Set<number>();
+  @State private calGen: number = 0;
+  @State private today: number = 0;
   @State private streak: number = 0;
   /** 热力图:每格的作答次数,按 day 升序,长度 = WEEKS*7 */
   @State private heat: number[] = [];
@@ -105,23 +116,20 @@ export struct StatsPage {
         total += d.reps;
       }
       this.totalReps = total;
-      // 学习天数是**有作答的天数**,全量;不再受热力图窗口限制
-      this.studiedDays = days.length;
+      // 学习天数 = **打卡天数**(用户自己说「今天就到这里」),不再是「有作答的天数」
+      const checkinDays: number[] = db.checkinDays();
+      this.checkins = new Set<number>(checkinDays);
+      this.studiedDays = checkinDays.length;
+      this.today = today;
+      this.calCells = calendarCells(this.calYear, this.calMonth);
+      this.calGen++;
       this.retention = db.retentionAll();
 
       // 按星期对齐:最后一列是本周,今天之后为 -1(见 Schema.heatCells)
       this.heat = heatCells(today, WEEKS, (d: number) => repsByDay.get(d) ?? 0);
 
-      // 连续学习天数:从今天往回数,遇到 0 就停。全量,不再被窗口截断
-      let streak = 0;
-      for (let d = today; ; d--) {
-        if ((repsByDay.get(d) ?? 0) > 0) {
-          streak++;
-        } else {
-          break;
-        }
-      }
-      this.streak = streak;
+      // 连续天数也按打卡算:漏一天不断,连漏两天才断(Schema.checkinStreak)
+      this.streak = checkinStreak(checkinDays, today);
 
       const times: number[] = [];
       for (let i = TIME_DAYS - 1; i >= 0; i--) {
@@ -177,6 +185,95 @@ export struct StatsPage {
       return '#5B95F6';
     }
     return '#3B82F6';
+  }
+
+  // ---------------------------------------------------------------- 打卡月历
+
+  private shiftMonth(delta: number): void {
+    let m: number = this.calMonth + delta;
+    let y: number = this.calYear;
+    while (m < 0) { m += 12; y--; }
+    while (m > 11) { m -= 12; y++; }
+    this.calYear = y;
+    this.calMonth = m;
+    this.calCells = calendarCells(y, m);
+  }
+
+  /** 月份不能翻到未来 —— 未来没有打卡可看 */
+  private canGoNext(): boolean {
+    const now: Date = new Date();
+    return this.calYear < now.getFullYear()
+      || (this.calYear === now.getFullYear() && this.calMonth < now.getMonth());
+  }
+
+  private calRows(): number[] {
+    const out: number[] = [];
+    for (let r = 0; r < this.calCells.length / 7; r++) {
+      out.push(r);
+    }
+    return out;
+  }
+
+  /** 月历的一格。**只接常量下标**:几号、是否本月、是否打卡都在内部现算 */
+  @Builder
+  calCell(idx: number) {
+    Stack() {
+      Text(`${calendarDate(this.calCells[idx] ?? 0)[2]}`)
+        .fontSize(13)
+        .fontColor(this.checkins.has(this.calCells[idx] ?? -1) ? Color.White
+          : calendarDate(this.calCells[idx] ?? 0)[1] === this.calMonth ? '#1C1C1E' : '#C7C7CC')
+    }
+    .layoutWeight(1).aspectRatio(1).margin(2)
+    .borderRadius(8)
+    .backgroundColor(this.checkins.has(this.calCells[idx] ?? -1) ? '#10B981' : 'rgba(0,0,0,0)')
+    .borderWidth(this.calCells[idx] === this.today ? 1.5 : 0)
+    .borderColor('#3B82F6')
+  }
+
+  @Builder
+  calRow(r: number) {
+    Row() {
+      this.calCell(r * 7)
+      this.calCell(r * 7 + 1)
+      this.calCell(r * 7 + 2)
+      this.calCell(r * 7 + 3)
+      this.calCell(r * 7 + 4)
+      this.calCell(r * 7 + 5)
+      this.calCell(r * 7 + 6)
+    }
+    .width('100%')
+  }
+
+  /**
+   * 打卡统计:月历。第一行年月(可左右翻月),第二行星期(周日开头),下面是日期格。
+   * 打过卡的日子是绿色,今天有蓝框;相邻月份的日子是浅灰字。
+   * 这是**打卡**的记录,与热力图(作答量)互相独立。
+   */
+  @Builder
+  checkinCalendar() {
+    Column({ space: 8 }) {
+      Row() {
+        Text(L(this.lang).checkinCalendar).fontSize(14).fontWeight(FontWeight.Medium).layoutWeight(1)
+        Text('‹').fontSize(22).fontColor('#3B82F6').width(36).textAlign(TextAlign.Center)
+          .onClick(() => this.shiftMonth(-1))
+        Text(fmt(L(this.lang).monthTitle, this.calYear, this.calMonth + 1))
+          .fontSize(14).fontColor('#1C1C1E')
+        Text('›').fontSize(22).width(36).textAlign(TextAlign.Center)
+          .fontColor(this.canGoNext() ? '#3B82F6' : '#D0D3DA')
+          .onClick(() => { if (this.canGoNext()) { this.shiftMonth(1); } })
+      }
+      .width('100%')
+      Row() {
+        ForEach(weekdayLabels(this.lang), (d: string) => {
+          Text(d).fontSize(11).fontColor('#8A8A8E').layoutWeight(1).textAlign(TextAlign.Center)
+        })
+      }
+      .width('100%')
+      ForEach(this.calRows(), (r: number) => {
+        this.calRow(r)
+      }, (r: number) => `${this.calGen}-${this.calYear}-${this.calMonth}-${r}`)
+    }
+    .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
   }
 
   /** 一列 = 一周七天。只接常量下标 */
@@ -325,6 +422,9 @@ export struct StatsPage {
         }
         .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
 
+        // ---- 打卡统计(月历)----
+        this.checkinCalendar()
+
         // ---- 最近 7 天学习时长 ----
         // 用的是 review_log.cost_ms,也就是做计时判档时记下的真实答题耗时,
         // 不是「打开应用多久」——后者会把发呆也算成学习。
@@ -426,12 +526,17 @@ export struct StatsPage {
   }
 
   /** 柱子下面的星期标签,最后一根是今天 */
+  /**
+   * 最近 7 天柱子下的星期。**必须按日序号取星期**(weekdaySun0),和柱子的数据同一个日界。
+   * 原来用的是 new Date(now - i 天).getDay(),即钟表上的日期:凌晨 0~3 点时
+   * 标签整体错一天 —— 周日的 8 分钟显示在「一」下面。
+   */
   private dayLabels(): string[] {
     const seq: string[] = L(this.lang).weekdays.split('|');
+    const today: number = dayIndex(Date.now());
     const out: string[] = [];
     for (let i = TIME_DAYS - 1; i >= 0; i--) {
-      const d = new Date(Date.now() - i * 86400000);
-      out.push(seq[d.getDay()]);
+      out.push(seq[weekdaySun0(today - i)]);
     }
     return out;
   }

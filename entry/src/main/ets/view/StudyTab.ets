@@ -15,7 +15,7 @@
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { ImportResult, importFromPicker } from '../data/Importer';
-import { DeckCounts } from '../data/Schema';
+import { DeckCounts, dayIndex } from '../data/Schema';
 import { L, LANG_ZH, fmt } from '../i18n/Strings';
 import { SK_LANG, SK_TICK, appStore } from '../store/AppStore';
 import { COLOR_DUE, COLOR_LEARN, COLOR_NEW, COLOR_ZERO } from './DeckColors';
@@ -43,7 +43,7 @@ const EMPTY_DECK: DeckCounts = {
 };
 
 /** 三个计数列的宽度。固定宽度才能让各行的数字上下对齐,像 Anki 的表格 */
-const COL_W: number = 56;
+const COL_W: number = 46;
 
 @Component
 export struct StudyTab {
@@ -55,6 +55,11 @@ export struct StudyTab {
   @State private decks: DeckCounts[] = [];
   @State private status: string = '';
   @State private busy: boolean = false;
+  /** 今天(凌晨 3 点分界)打过卡没有 */
+  @State private checkedIn: boolean = false;
+  /** 全部牌组今天的待学习 / 待复习之和 —— 就是各行数字相加,同一个口径 */
+  @State private totalNew: number = 0;
+  @State private totalDue: number = 0;
   /**
    * 待确认的操作:作用于哪一组(下标)、什么操作(1 清空进度 / 2 删除牌组)。
    * 两个都不可撤销,所以一律二次确认 —— 菜单里点一下只是「打开确认框」。
@@ -76,7 +81,18 @@ export struct StudyTab {
       return;
     }
     try {
-      this.decks = st.getDb().deckCounts(Date.now(), st.newPerDay, st.reviewLimit);
+      const db = st.getDb();
+      const now: number = Date.now();
+      this.decks = db.deckCounts(now, st.newPerDay, st.reviewLimit);
+      let n = 0;
+      let d = 0;
+      for (const x of this.decks) {
+        n += x.newCount;
+        d += x.dueCount;
+      }
+      this.totalNew = n;
+      this.totalDue = d;
+      this.checkedIn = db.isCheckedIn(dayIndex(now));
     } catch (e) {
       this.status = fmt(L(this.lang).readFailed, `${e}`);
       hilog.error(DOMAIN, TAG, '读取牌组失败 %{public}s', `${e}`);
@@ -85,6 +101,83 @@ export struct StudyTab {
 
   private openDeck(i: number): void {
     this.stack.pushPath({ name: ROUTE_DECK, param: this.decks[i].id });
+  }
+
+  // ---------------------------------------------------------------- 打卡
+
+  /**
+   * 点打卡。**打卡是用户自己说「今天就到这里」**,统计里的学习天数按它算。
+   * 待学习 + 待复习都是 0:直接打卡;还有剩:先问一句。已打卡:什么都不做(不能撤销)。
+   */
+  private onCheckIn(): void {
+    if (this.checkedIn) {
+      return;
+    }
+    if (this.totalNew + this.totalDue === 0) {
+      this.doCheckIn();
+      return;
+    }
+    this.getUIContext().showAlertDialog({
+      title: L(this.lang).checkInConfirmTitle,
+      message: fmt(L(this.lang).checkInConfirmBody, this.totalNew, this.totalDue),
+      autoCancel: true,
+      primaryButton: { value: L(this.lang).cancel, action: () => {} },
+      secondaryButton: { value: L(this.lang).checkInAnyway, action: () => this.doCheckIn() },
+    });
+  }
+
+  private doCheckIn(): void {
+    try {
+      const now: number = Date.now();
+      appStore().getDb().checkIn(dayIndex(now), now);
+      this.checkedIn = true;
+      this.status = L(this.lang).checkInDone;
+      appStore().bump();      // 统计页的学习天数 / 月历跟着变
+    } catch (e) {
+      this.status = fmt(L(this.lang).saveFailed, `${e}`);
+    }
+  }
+
+  /**
+   * 「今日」卡片:全部牌组的待学习 / 待复习之和 + 打卡按钮。
+   * 未打卡灰、已打卡绿 —— 绿色在 REPS 里只表示「完成 / 掌握」。
+   */
+  @Builder
+  todayCard() {
+    Row() {
+      Column({ space: 4 }) {
+        Text(L(this.lang).todayTitle).fontSize(13).fontColor('#8A8A8E')
+        Row({ space: 18 }) {
+          Column({ space: 1 }) {
+            Text(`${this.totalNew}`).fontSize(24).fontWeight(FontWeight.Bold)
+              .fontColor(this.totalNew === 0 ? COLOR_ZERO : COLOR_NEW)
+            Text(L(this.lang).toLearn).fontSize(11).fontColor('#8A8A8E')
+          }
+          .alignItems(HorizontalAlign.Start)
+          Column({ space: 1 }) {
+            Text(`${this.totalDue}`).fontSize(24).fontWeight(FontWeight.Bold)
+              .fontColor(this.totalDue === 0 ? COLOR_ZERO : COLOR_DUE)
+            Text(L(this.lang).toReview).fontSize(11).fontColor('#8A8A8E')
+          }
+          .alignItems(HorizontalAlign.Start)
+        }
+      }
+      .alignItems(HorizontalAlign.Start).layoutWeight(1)
+
+      Row({ space: 4 }) {
+        Text(this.checkedIn ? '✓' : '○').fontSize(15)
+          .fontColor(this.checkedIn ? Color.White : '#8A8A8E')
+        Text(this.checkedIn ? L(this.lang).checkedIn : L(this.lang).notCheckedIn)
+          .fontSize(14).fontWeight(FontWeight.Medium)
+          .fontColor(this.checkedIn ? Color.White : '#8A8A8E')
+      }
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      .borderRadius(20)
+      .backgroundColor(this.checkedIn ? '#10B981' : '#EDEEF2')
+      .onClick(() => this.onCheckIn())
+    }
+    .width('90%').padding(16).margin({ top: 16, bottom: 12 })
+    .borderRadius(16).backgroundColor(Color.White)
   }
 
   // ---------------------------------------------------------------- 牌组操作
@@ -212,8 +305,10 @@ export struct StudyTab {
   deckRow(i: number) {
     Row() {
       Column({ space: 2 }) {
+        // 英文名不能在单词中间断开(实测 Miscellaneous 被切成 Miscellaneou / s)
         Text(this.deckAt(i).name)
           .fontSize(16).fontWeight(FontWeight.Medium).fontColor('#1C1C1E')
+          .wordBreak(WordBreak.NORMAL)
           .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
         Text(`${this.deckAt(i).cards} ${L(this.lang).cardsUnit}`)
           .fontSize(11).fontColor('#8A8A8E')
@@ -240,9 +335,8 @@ export struct StudyTab {
   @Builder
   deckList() {
     Column() {
-      Text(L(this.lang).deckListTitle)
-        .fontSize(26).fontWeight(FontWeight.Bold)
-        .width('90%').margin({ top: 16, bottom: 10 })
+      // 不再有「牌组」大标题:「今日」卡片就是这一页的顶部
+      this.todayCard()
 
       if (this.decks.length === 0) {
         Text(L(this.lang).deckListEmpty)
