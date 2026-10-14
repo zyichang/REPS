@@ -1,4 +1,5 @@
-import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
+import { AbilityConstant, Configuration, UIAbility, Want } from '@kit.AbilityKit';
+import { appStore } from '../store/AppStore';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { KeyboardAvoidMode, window } from '@kit.ArkUI';
 
@@ -8,6 +9,14 @@ const TAG: string = 'REPS';
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, 'EntryAbility onCreate');
+  }
+
+  /** 系统语言等配置变了。语言设为「跟随系统」时界面要跟着换 */
+  onConfigurationUpdate(config: Configuration): void {
+    hilog.info(DOMAIN, TAG, '配置变化 language=%{public}s', config.language ?? '');
+    if (appStore().isReady()) {
+      appStore().onSystemLanguageChanged();
+    }
   }
 
   onDestroy(): void {

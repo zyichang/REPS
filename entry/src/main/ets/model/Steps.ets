@@ -64,3 +64,15 @@ export function nearestStepIndex(steps: number[], value: number): number {
   }
   return best;
 }
+
+/**
+ * 浏览器一次加载多少张(刷到底再加载下一批)。**最大 200**:一批太大,
+ * 打开浏览页的第一帧就要建几百行,分页也就失去了意义。
+ */
+export const BROWSE_PAGE_STEPS: number[] = [50, 100, 150, 200];
+export const DEFAULT_BROWSE_PAGE: number = 50;
+
+/** 存下来的页大小不在档位里(比如被外部改过)时,吸附到最近的一档,且不超过 200 */
+export function clampBrowsePage(n: number): number {
+  return BROWSE_PAGE_STEPS[nearestStepIndex(BROWSE_PAGE_STEPS, n)];
+}

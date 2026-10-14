@@ -114,6 +114,13 @@ export interface Dict {
   unlimited: string;
   langSection: string;
   langHint: string;
+  langSystem: string;
+  advancedSection: string;
+  /** 高级设置入口的摘要:新卡 %s · 复习 %s · 浏览每批 %s */
+  advancedSummary: string;
+  browseSection: string;
+  browsePage: string;
+  browsePageHint: string;
   langChinese: string;
   langEnglish: string;
   formatSection: string;
@@ -275,6 +282,12 @@ const ZH: Dict = {
   unlimited: '不限',
   langSection: '语言',
   langHint: '点一行切换。切换立刻生效,不用重启。',
+  langSystem: '跟随系统',
+  advancedSection: '高级设置',
+  advancedSummary: '新卡 %s · 复习 %s · 浏览每批 %s',
+  browseSection: '浏览',
+  browsePage: '每批加载张数',
+  browsePageHint: '浏览卡片时先显示这么多张,滑到底再加载下一批。卡多时调小更流畅',
   langChinese: '中文', langEnglish: 'English',
   formatSection: '导入格式',
   formatValue: 'Quizify Card Markdown v1  ·  YAML 卡组',
@@ -396,6 +409,12 @@ const EN: Dict = {
   unlimited: 'Unlimited',
   langSection: 'Language',
   langHint: 'Tap a row to switch. Takes effect immediately, no restart.',
+  langSystem: 'Follow system',
+  advancedSection: 'Advanced settings',
+  advancedSummary: 'New %s · Review %s · Browse %s per batch',
+  browseSection: 'Browse',
+  browsePage: 'Cards per batch',
+  browsePageHint: 'The browser shows this many cards first and loads the next batch when you reach the end',
   langChinese: '中文', langEnglish: 'English',
   formatSection: 'Import format',
   formatValue: 'Quizify Card Markdown v1  ·  YAML decks',

@@ -18,9 +18,12 @@
  */
 
 import {
-  AHEAD_STEPS, SK_BACK_REQ, SK_CAN_BACK, SK_LANG, DEFAULT_AHEAD_COUNT, DEFAULT_NEW_PER_DAY, DEFAULT_RETENTION, DEFAULT_REVIEW_LIMIT, SK_TICK, appStore,
+  AHEAD_STEPS, LANG_MODE_SYSTEM, SK_BACK_REQ, SK_CAN_BACK, SK_LANG, DEFAULT_AHEAD_COUNT,
+  DEFAULT_NEW_PER_DAY, DEFAULT_RETENTION, DEFAULT_REVIEW_LIMIT, SK_TICK, appStore,
 } from '../store/AppStore';
-import { LIMIT_STEPS, NEW_STEPS, RETENTION_PCT, nearestStepIndex } from '../model/Steps';
+import {
+  BROWSE_PAGE_STEPS, DEFAULT_BROWSE_PAGE, LIMIT_STEPS, NEW_STEPS, RETENTION_PCT, nearestStepIndex,
+} from '../model/Steps';
 import { getFsrsParams, setFsrsParams } from '../srs/Srs';
 import { L, LANG_EN, LANG_ZH, algoLabels, fmt } from '../i18n/Strings';
 
@@ -28,6 +31,7 @@ import { L, LANG_EN, LANG_ZH, algoLabels, fmt } from '../i18n/Strings';
 enum Sub {
   Root = 0,
   Algo = 1,
+  /** 高级设置:今日集合 + 作答 + 浏览 */
   SetParams = 2,
   Format = 3,
   Language = 4,
@@ -39,6 +43,7 @@ enum NumKey {
   NewPerDay = 1,
   Retention = 2,
   Ahead = 3,
+  BrowsePage = 4,
 }
 
 @Component
@@ -56,6 +61,8 @@ export struct ProfilePage {
   @State private retention: number = DEFAULT_RETENTION;
   @State private aheadCount: number = DEFAULT_AHEAD_COUNT;
   @State private autoNext: boolean = true;
+  @State private browsePage: number = DEFAULT_BROWSE_PAGE;
+  @State private langMode: string = LANG_MODE_SYSTEM;
   /** 当前在哪一层子页 */
   @State private sub: Sub = Sub.Root;
   /**
@@ -105,6 +112,8 @@ export struct ProfilePage {
     this.retention = st.retention;
     this.aheadCount = st.aheadCount;
     this.autoNext = st.autoNext;
+    this.browsePage = st.browsePage;
+    this.langMode = st.langMode;
   }
 
   private pickAlgo(which: number): void {
@@ -130,6 +139,9 @@ export struct ProfilePage {
     if (which === NumKey.Retention) {
       return RETENTION_PCT;
     }
+    if (which === NumKey.BrowsePage) {
+      return BROWSE_PAGE_STEPS;
+    }
     return AHEAD_STEPS;
   }
 
@@ -143,6 +155,9 @@ export struct ProfilePage {
     }
     if (which === NumKey.Retention) {
       return Math.round(this.retention * 100);
+    }
+    if (which === NumKey.BrowsePage) {
+      return this.browsePage;
     }
     return this.aheadCount;
   }
@@ -174,6 +189,8 @@ export struct ProfilePage {
       st.setReviewLimit(v);
     } else if (which === NumKey.NewPerDay) {
       st.setNewPerDay(v);
+    } else if (which === NumKey.BrowsePage) {
+      st.setBrowsePage(v);
     } else if (which === NumKey.Retention) {
       const r: number = v / 100;
       st.setRetention(r);
@@ -234,7 +251,7 @@ export struct ProfilePage {
       return L(this.lang).algoSection;
     }
     if (section === Sub.SetParams) {
-      return L(this.lang).dailySection;
+      return L(this.lang).advancedSection;
     }
     if (section === Sub.Format) {
       return L(this.lang).formatSection;
@@ -249,14 +266,24 @@ export struct ProfilePage {
       return `${algoLabels(this.lang)[i]} · ${Math.round(this.retention * 100)}%`;
     }
     if (section === Sub.SetParams) {
-      return fmt(L(this.lang).setSummary,
+      return fmt(L(this.lang).advancedSummary, `${this.newPerDay}`,
         this.reviewLimit >= 9999 ? L(this.lang).unlimited : `${this.reviewLimit}`,
-        `${this.newPerDay}`, `${this.aheadCount}`);
+        `${this.browsePage}`);
     }
     if (section === Sub.Format) {
       return L(this.lang).formatValue;
     }
-    return this.lang === LANG_EN ? L(this.lang).langEnglish : L(this.lang).langChinese;
+    return this.langLabel(this.langModeIndex());
+  }
+
+  /** 语言选项:0 跟随系统 / 1 中文 / 2 English。默认是跟随系统,所以排第一 */
+  private langModeIndex(): number {
+    return this.langMode === LANG_ZH ? 1 : this.langMode === LANG_EN ? 2 : 0;
+  }
+
+  /** 「中文」「English」用各自的语言写,任何界面语言下都认得出来;「跟随系统」随界面 */
+  private langLabel(which: number): string {
+    return which === 1 ? '中文' : which === 2 ? 'English' : L(this.lang).langSystem;
   }
 
   /** 子页标题栏。只接常量下标 */
@@ -300,16 +327,34 @@ export struct ProfilePage {
   @Builder
   langOption(which: number) {
     Row() {
-      Text(which === 0 ? L(this.lang).langChinese : L(this.lang).langEnglish)
-        .fontSize(15).layoutWeight(1)
-      if ((which === 0 && this.lang !== LANG_EN) || (which === 1 && this.lang === LANG_EN)) {
+      Text(this.langLabel(which)).fontSize(15).layoutWeight(1)
+      if (this.langModeIndex() === which) {
         Text('✓').fontSize(17).fontColor('#3B82F6')
       }
     }
     .width('100%').padding({ top: 10, bottom: 10 })
     .onClick(() => {
-      appStore().setLanguage(which === 1 ? LANG_EN : LANG_ZH);
+      appStore().setLanguageMode(which === 1 ? LANG_ZH : which === 2 ? LANG_EN : LANG_MODE_SYSTEM);
+      this.pull();
     })
+  }
+
+  /** 一节的标题 + 说明。说明属于整节,所以放在标题下面,而不是跟在最后一行后面 */
+  @Builder
+  sectionHead(which: number) {
+    Column({ space: 3 }) {
+      Text(which === 0 ? L(this.lang).dailySection
+        : which === 1 ? L(this.lang).autoNextLabel
+        : which === 2 ? L(this.lang).browseSection
+        : L(this.lang).langSection)
+        .fontSize(15).fontWeight(FontWeight.Medium).fontColor('#1C1C1E').width('100%')
+      Text(which === 0 ? L(this.lang).dailyHint
+        : which === 1 ? L(this.lang).autoNextHint
+        : which === 2 ? L(this.lang).browsePageHint
+        : L(this.lang).langHint)
+        .fontSize(11).fontColor('#8A8A8E').width('100%')
+    }
+    .width('100%').alignItems(HorizontalAlign.Start).padding({ left: 4, right: 4 })
   }
 
   private isPicked(which: number): boolean {
@@ -324,13 +369,17 @@ export struct ProfilePage {
         Text(which === NumKey.ReviewLimit ? L(this.lang).reviewLimit
           : which === NumKey.NewPerDay ? L(this.lang).newPerDay
           : which === NumKey.Retention ? L(this.lang).retention
+          : which === NumKey.BrowsePage ? L(this.lang).browsePage
           : L(this.lang).aheadCount)
           .fontSize(15)
-        Text(which === NumKey.ReviewLimit ? L(this.lang).reviewLimitHint
-          : which === NumKey.NewPerDay ? L(this.lang).newPerDayHint
-          : which === NumKey.Retention ? L(this.lang).retentionHint
-          : L(this.lang).aheadCountHint)
-          .fontSize(11).fontColor('#8A8A8E')
+        // 浏览那一行的说明已在节标题下,这里不再重复
+        if (which !== NumKey.BrowsePage) {
+          Text(which === NumKey.ReviewLimit ? L(this.lang).reviewLimitHint
+            : which === NumKey.NewPerDay ? L(this.lang).newPerDayHint
+            : which === NumKey.Retention ? L(this.lang).retentionHint
+            : L(this.lang).aheadCountHint)
+            .fontSize(11).fontColor('#8A8A8E')
+        }
       }
       .alignItems(HorizontalAlign.Start).layoutWeight(1)
 
@@ -381,27 +430,9 @@ export struct ProfilePage {
         .width('100%').margin({ top: 14 })
 
       this.entryRow(Sub.Algo)
-      this.entryRow(Sub.SetParams)
-      this.entryRow(Sub.Format)
       this.entryRow(Sub.Language)
-
-      // ---- 作答:单个开关,没必要再点进一层 ----
-      Column({ space: 2 }) {
-        Text(L(this.lang).autoNextLabel).fontSize(13).fontColor('#8A8A8E')
-          .width('100%').margin({ bottom: 4 })
-        Row() {
-          Column({ space: 3 }) {
-            Text(this.autoNext ? L(this.lang).autoNextOn : L(this.lang).autoNextOff)
-              .fontSize(15)
-            Text(L(this.lang).autoNextHint).fontSize(11).fontColor('#8A8A8E')
-          }
-          .alignItems(HorizontalAlign.Start).layoutWeight(1)
-          Toggle({ type: ToggleType.Switch, isOn: this.autoNext })
-            .onChange(() => this.toggleAutoNext())
-        }
-        .width('100%').padding({ top: 10, bottom: 10 })
-      }
-      .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
+      this.entryRow(Sub.Format)
+      this.entryRow(Sub.SetParams)
 
       // ---- 关于 ----
       Column({ space: 4 }) {
@@ -443,22 +474,44 @@ export struct ProfilePage {
     .constraintSize({ minHeight: '100%' })
   }
 
-  /** 集合参数子页:今日这一批卡有多大 */
+  /**
+   * 高级设置:三节,每节「标题 + 说明」在上、设置项在下。
+   *   今日集合 —— 这一批卡有多大
+   *   答对后   —— 作答流程的开关
+   *   浏览     —— 每批加载多少张
+   */
   @Builder
   setBody() {
     Column({ space: 12 }) {
       this.subHeader(Sub.SetParams)
 
+      this.sectionHead(0)
       Column({ space: 2 }) {
         this.numRow(NumKey.ReviewLimit)
         Divider().color('#E5E5EA')
         this.numRow(NumKey.NewPerDay)
         Divider().color('#E5E5EA')
         this.numRow(NumKey.Ahead)
-        Text(L(this.lang).dailyHint)
-          .fontSize(11).fontColor('#B0B7C3').width('100%').margin({ top: 6 })
       }
-      .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
+      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 2 })
+      .borderRadius(12).backgroundColor('#FAFAFC')
+
+      this.sectionHead(1)
+      Row() {
+        Text(this.autoNext ? L(this.lang).autoNextOn : L(this.lang).autoNextOff)
+          .fontSize(15).layoutWeight(1)
+        Toggle({ type: ToggleType.Switch, isOn: this.autoNext })
+          .onChange(() => this.toggleAutoNext())
+      }
+      .width('100%').padding({ left: 14, right: 14, top: 10, bottom: 10 })
+      .borderRadius(12).backgroundColor('#FAFAFC')
+
+      this.sectionHead(2)
+      Column() {
+        this.numRow(NumKey.BrowsePage)
+      }
+      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 2 })
+      .borderRadius(12).backgroundColor('#FAFAFC')
     }
     .width('90%').padding({ bottom: 20 })
     .constraintSize({ minHeight: '100%' })
@@ -489,18 +542,20 @@ export struct ProfilePage {
     .constraintSize({ minHeight: '100%' })
   }
 
-  /** 语言子页:两个选项,不上滚轮 */
+  /** 语言子页:跟随系统 / 中文 / English。说明属于整页,放在标题下面 */
   @Builder
   langBody() {
     Column({ space: 12 }) {
       this.subHeader(Sub.Language)
 
+      Text(L(this.lang).langHint).fontSize(11).fontColor('#8A8A8E')
+        .width('100%').padding({ left: 4, right: 4 })
       Column({ space: 2 }) {
         this.langOption(0)
         Divider()
         this.langOption(1)
-        Text(L(this.lang).langHint)
-          .fontSize(11).fontColor('#B0B7C3').width('100%').margin({ top: 6 })
+        Divider()
+        this.langOption(2)
       }
       .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
     }

@@ -15,8 +15,10 @@
 
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
+import { i18n } from '@kit.LocalizationKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Database } from '../data/Database';
+import { DEFAULT_BROWSE_PAGE, clampBrowsePage } from '../model/Steps';
 import { LANG_EN, LANG_ZH, algoLabels, intervalUnits } from '../i18n/Strings';
 import { getFsrsParams, setAlgorithm, setFsrsParams, setIntervalUnits } from '../srs/Srs';
 import { setMessageLang as setQuizifyLang } from '../data/Quizify';
@@ -33,7 +35,13 @@ const K_REVIEW_LIMIT: string = 'review_limit';
 const K_NEW_PER_DAY: string = 'new_per_day';
 const K_RETENTION: string = 'target_retention';
 const K_AHEAD_COUNT: string = 'ahead_count';
-const K_LANG: string = 'lang';
+/**
+ * 语言**模式**:'system'(默认,跟随系统)/ 'zh' / 'en'。
+ * 用新 key 而不是沿用旧的 'lang':旧 key 是「当时显示的语言」,
+ * 沿用它会让老用户永远停在某一种语言上,「跟随系统」这个默认值就失效了。
+ */
+const K_LANG_MODE: string = 'lang_mode';
+const K_BROWSE_PAGE: string = 'browse_page';
 const K_AUTO_NEXT: string = 'auto_next';
 
 /** 默认值 */
@@ -93,8 +101,12 @@ class Store {
   retention: number = DEFAULT_RETENTION;
   /** 「学习更多」每次提前拿几张 */
   aheadCount: number = DEFAULT_AHEAD_COUNT;
-  /** 'zh' 或 'en'。真正驱动界面的是 AppStorage 里的 SK_LANG */
+  /** 实际显示的语言:'zh' 或 'en'。真正驱动界面的是 AppStorage 里的 SK_LANG */
   lang: string = LANG_ZH;
+  /** 用户选的语言模式:LANG_MODE_SYSTEM / LANG_ZH / LANG_EN */
+  langMode: string = LANG_MODE_SYSTEM;
+  /** 浏览器一次加载多少张 */
+  browsePage: number = DEFAULT_BROWSE_PAGE;
   /** 答对之后自动进入下一张(否则停在解析界面等用户点「下一个」) */
   autoNext: boolean = true;
 
@@ -127,7 +139,9 @@ class Store {
     this.newPerDay = p.getSync(K_NEW_PER_DAY, DEFAULT_NEW_PER_DAY) as number;
     this.retention = p.getSync(K_RETENTION, DEFAULT_RETENTION) as number;
     this.aheadCount = p.getSync(K_AHEAD_COUNT, DEFAULT_AHEAD_COUNT) as number;
-    this.lang = p.getSync(K_LANG, LANG_ZH) as string;
+    this.langMode = p.getSync(K_LANG_MODE, LANG_MODE_SYSTEM) as string;
+    this.lang = resolveLang(this.langMode);
+    this.browsePage = clampBrowsePage(p.getSync(K_BROWSE_PAGE, DEFAULT_BROWSE_PAGE) as number);
     // preferences 这一层只存字符串/数字,布尔用 1/0 表示
     this.autoNext = (p.getSync(K_AUTO_NEXT, 1) as number) !== 0;
     AppStorage.setOrCreate(SK_LANG, this.lang);
@@ -170,10 +184,33 @@ class Store {
     this.bump();
   }
 
-  /** 切语言。同时写 AppStorage,否则界面不会跟着变 */
-  setLanguage(lang: string): void {
+  /** 浏览器每批张数。只接受档位里的值,最大 200 */
+  setBrowsePage(n: number): void {
+    this.browsePage = clampBrowsePage(n);
+    this.put(K_BROWSE_PAGE, this.browsePage);
+    this.bump();
+  }
+
+  /**
+   * 系统语言变了(EntryAbility.onConfigurationUpdate 调用)。
+   * 只有「跟随系统」模式才需要跟着换。
+   */
+  onSystemLanguageChanged(): void {
+    if (this.langMode === LANG_MODE_SYSTEM) {
+      this.applyLang(resolveLang(this.langMode));
+    }
+  }
+
+  /** 选语言模式:中文 / 英文 / 跟随系统 */
+  setLanguageMode(mode: string): void {
+    this.langMode = mode === LANG_ZH || mode === LANG_EN ? mode : LANG_MODE_SYSTEM;
+    this.put(K_LANG_MODE, this.langMode);
+    this.applyLang(resolveLang(this.langMode));
+  }
+
+  /** 换实际显示的语言。同时写 AppStorage,否则界面不会跟着变 */
+  private applyLang(lang: string): void {
     this.lang = lang === LANG_EN ? LANG_EN : LANG_ZH;
-    this.put(K_LANG, this.lang);
     AppStorage.setOrCreate(SK_LANG, this.lang);
     // **切语言时必须重新注入。** 只写 AppStorage 只够界面重绘,
     // 排期单位和解析器报错是注入式的,不跟着改就会中英混着出。
@@ -224,6 +261,26 @@ class Store {
   bump(): void {
     const n: number = (AppStorage.get<number>(SK_TICK) ?? 0) + 1;
     AppStorage.setOrCreate(SK_TICK, n);
+  }
+}
+
+/** 语言模式:跟随系统 */
+export const LANG_MODE_SYSTEM: string = 'system';
+
+/**
+ * 语言模式 → 实际语言。跟随系统时:系统是中文(zh-*)就中文,其余一律英文 ——
+ * 目前只有中英两套文案,日文系统也只能显示英文。读系统语言失败时退回中文。
+ */
+function resolveLang(mode: string): string {
+  if (mode === LANG_ZH || mode === LANG_EN) {
+    return mode;
+  }
+  try {
+    const sys: string = i18n.System.getSystemLanguage();
+    return sys.toLowerCase().startsWith('zh') ? LANG_ZH : LANG_EN;
+  } catch (e) {
+    hilog.error(DOMAIN, TAG, '读取系统语言失败 %{public}s', `${e}`);
+    return LANG_ZH;
   }
 }
 

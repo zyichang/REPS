@@ -8,7 +8,10 @@
  * 模拟器上还验不了:合成的滑动手势驱动不了 TextPicker(和 uiInput dircFling
  * 划不动列表是同一类问题),所以只能靠这里的断言。
  */
-import { LIMIT_STEPS, NEW_STEPS, RETENTION_PCT, nearestStepIndex } from './Steps';
+import {
+  BROWSE_PAGE_STEPS, DEFAULT_BROWSE_PAGE, LIMIT_STEPS, NEW_STEPS, RETENTION_PCT, clampBrowsePage,
+  nearestStepIndex,
+} from './Steps';
 
 let pass = 0;
 let fail = 0;
@@ -108,6 +111,13 @@ for (const pct of RETENTION_PCT) {
   }
 }
 check('保持率经过 /100 存盘再 *100 读回,18 档全部对得上', pctTrip);
+
+console.log('\n=== 浏览器每批张数 ===');
+check('档位是 50 / 100 / 150 / 200', BROWSE_PAGE_STEPS.join(',') === '50,100,150,200');
+check('默认 50,且在档位里', DEFAULT_BROWSE_PAGE === 50 && BROWSE_PAGE_STEPS.indexOf(DEFAULT_BROWSE_PAGE) >= 0);
+check('**超过 200 的值被压回 200**', clampBrowsePage(500) === 200 && clampBrowsePage(100000) === 200);
+check('不在档位里的值就近吸附', clampBrowsePage(120) === 100 && clampBrowsePage(10) === 50);
+check('档位内的值原样保留', BROWSE_PAGE_STEPS.every((v) => clampBrowsePage(v) === v));
 
 console.log(`\n===== 结果: ${pass} 通过 / ${fail} 失败 =====`);
 if (fail > 0) {
