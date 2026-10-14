@@ -245,7 +245,7 @@ const ZH: Dict = {
   studyMore: '学习更多',
   studyMoreHint: '提前复习今天和明天的卡,每次 %d 张',
   studyMoreEmpty: '今天和明天都没有待复习的卡了 —— 可以歇了,或者去卡组里导入新的',
-  backHome: '回到首页',
+  backHome: '回到本组概览',
   importing: '正在导入…',
   nextIn: '下次',
 
@@ -369,7 +369,7 @@ const EN: Dict = {
   studyMore: 'Study more',
   studyMoreHint: "Review today's and tomorrow's cards early, %d at a time",
   studyMoreEmpty: 'Nothing left for today or tomorrow — rest, or import a new deck',
-  backHome: 'Back to home',
+  backHome: 'Back to deck',
   importing: 'Importing…',
   nextIn: 'Next in',
 
