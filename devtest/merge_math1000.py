@@ -9,9 +9,9 @@ REPS 的 YAML 导入器本身就是「读出 front / back,拼回 Quizify Markdow
 两条路径解析出来的题型、选项、标识键必然一致 —— 不需要(也不应该)在这里
 另写一套题型判定,否则两边会慢慢说出不同的话。
 
-输出:
-  C:\\temp\\math1000\\math1000.md
-  C:\\temp\\math1000\\math1000.yml
+输出(随仓库保存,作为长期测试数据;推到模拟器见 devtest/push_testdata.sh):
+  testdata/math1000.md
+  testdata/math1000.yml
 """
 import io
 import os
@@ -19,7 +19,7 @@ import re
 import sys
 
 SRC = '/mnt/c/Users/yicha/Development/PKB/DocforAnki/Math_1000_Markdown'
-OUT = '/mnt/c/temp/math1000'
+OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'testdata')
 DECK = 'Math_1000'
 
 # 篇的顺序由目录名前缀决定(01_ 在 02_ 前),章的顺序由 ChNN 决定

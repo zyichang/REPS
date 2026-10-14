@@ -10,10 +10,13 @@
  *   tsx devtest/verify_math1000.ts
  */
 import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ParsedDeck, cardKeyOf, parseQuizify } from './Quizify';
 import { parseYamlDeck } from './Yaml';
 
-const DIR = 'C:\\temp\\math1000';
+// 测试数据随仓库保存在 testdata/,由 merge_math1000.py 生成
+const DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'testdata');
 
 let pass = 0;
 let fail = 0;
@@ -28,8 +31,8 @@ function check(name: string, ok: boolean, detail?: string): void {
   }
 }
 
-const mdText = readFileSync(`${DIR}\\math1000.md`, 'utf8');
-const ymlText = readFileSync(`${DIR}\\math1000.yml`, 'utf8');
+const mdText = readFileSync(join(DIR, 'math1000.md'), 'utf8');
+const ymlText = readFileSync(join(DIR, 'math1000.yml'), 'utf8');
 
 const t0 = Date.now();
 const md: ParsedDeck = parseQuizify(mdText, 'math1000.md');
