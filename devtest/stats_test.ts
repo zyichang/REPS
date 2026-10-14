@@ -13,6 +13,8 @@ import {
   DDL, LogPoint, SQL_DAY_STATS, SQL_DUE_FORECAST_IN_DECK, SQL_RETENTION_ALL,
   MIGRATE_FLATTEN_DECKS, SQL_HAS_PARENT_COL,
   SQL_STABILITY_IN_DECK, dayAnchor, dayIndex, retentionOf,
+  SQL_COUNT_DUE_IN_DECK, SQL_COUNT_NEW_IN_DECK, SQL_DUE_CARDS, SQL_DUE_CARDS_IN_DECK,
+  SQL_NEW_CARDS, SQL_NEW_CARDS_IN_DECK,
 } from './Schema';
 
 let pass = 0;
@@ -163,6 +165,28 @@ check('2 号卡组 2 张,其中 1 张未学', st2.length === 2
   && st2.filter((r) => r.stability === 0).length === 1, `${st2.length} 张`);
 check('各档之和 = 卡组卡片数(分子分母不会错位)',
   st1.length + st2.length === 5);
+
+console.log('\n=== 3b. 计数查询 vs 取 id 再数(两条路径不许漂移) ===');
+
+// 词卡表页原来用 dueCardIdsInDeck(…, 100000).length 数到期卡,
+// 现在改走 COUNT。两种算法必须对每个卡组、每个时刻给出同一个数。
+interface NRow { n: number }
+interface IdRow { card_id: number }
+const BIG = 100000;
+for (const deck of [0, 1, 2]) {
+  for (const t of [now, soon, soon + 1500, later]) {
+    const cnt = (db.prepare(SQL_COUNT_DUE_IN_DECK).get(t, deck, deck) as NRow).n;
+    const ids = deck === 0
+      ? db.prepare(SQL_DUE_CARDS).all(t, BIG) as IdRow[]
+      : db.prepare(SQL_DUE_CARDS_IN_DECK).all(deck, t, BIG) as IdRow[];
+    check(`到期计数 deck=${deck} t=${t - now}ms`, cnt === ids.length, `${cnt} vs ${ids.length}`);
+  }
+  const newCnt = (db.prepare(SQL_COUNT_NEW_IN_DECK).get(deck, deck) as NRow).n;
+  const newIds = deck === 0
+    ? db.prepare(SQL_NEW_CARDS).all(BIG) as IdRow[]
+    : db.prepare(SQL_NEW_CARDS_IN_DECK).all(deck, BIG) as IdRow[];
+  check(`新卡计数 deck=${deck}`, newCnt === newIds.length, `${newCnt} vs ${newIds.length}`);
+}
 
 db.close();
 

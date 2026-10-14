@@ -427,6 +427,24 @@ export const SQL_UNLEARNED_COUNT: string =
       LIMIT ?)`;
 
 /**
+ * 某个卡组(0 表示全部)此刻到期的卡有多少张。列名必须叫 n。
+ * 只为了显示一个数字,不要用 dueCardIdsInDeck(…, 100000).length ——
+ * 那会把十万个 id 读进内存再丢掉。
+ */
+export const SQL_COUNT_DUE_IN_DECK: string =
+  `SELECT COUNT(*) AS n FROM cards c
+     JOIN notes nt ON nt.id = c.note_id
+     JOIN scheduling s ON s.card_id = c.id
+    WHERE s.due <= ? AND (? = 0 OR nt.deck_id = ?)`;
+
+/** 某个卡组(0 表示全部)还没学过的卡有多少张,不设上限。列名必须叫 n */
+export const SQL_COUNT_NEW_IN_DECK: string =
+  `SELECT COUNT(*) AS n FROM cards c
+     JOIN notes nt ON nt.id = c.note_id
+     LEFT JOIN scheduling s ON s.card_id = c.id
+    WHERE s.card_id IS NULL AND (? = 0 OR nt.deck_id = ?)`;
+
+/**
  * 今天已经引入过的新卡数 —— 用 `first_seen` 判定。
  * 有了它,「每日新卡额度」才真的是**每天**的:剩余额度 = 额度 − 今天已引入。
  * 早先没有这个数,做完 20 张再开一轮又会给 20 张。

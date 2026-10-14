@@ -18,7 +18,8 @@ import { CardState, NoteType, ReviewLog } from '../model/Models';
 import {
   CardBrief, DDL, DayStat, DeckRow, LogPoint, MIGRATE_FLATTEN_DECKS, ReviewCardRow,
   ReviewedCard, SQL_AHEAD_CARDS, SQL_AHEAD_CARDS_IN_DECK, SQL_COUNT_CARDS,
-  SQL_COUNT_CARDS_IN_DECK, SQL_COUNT_DUE, SQL_COUNT_NEW, SQL_DAY_STATS, SQL_DECK_NOTE_COUNT,
+  SQL_COUNT_CARDS_IN_DECK, SQL_COUNT_DUE, SQL_COUNT_DUE_IN_DECK, SQL_COUNT_NEW,
+  SQL_COUNT_NEW_IN_DECK, SQL_DAY_STATS, SQL_DECK_NOTE_COUNT,
   SQL_DELETE_DECK, SQL_DELETE_DECK_CARDS, SQL_DELETE_DECK_LOGS, SQL_DELETE_DECK_NOTES,
   SQL_DELETE_DECK_SCHED, SQL_DELETE_NOTE, SQL_DELETE_NOTE_CARDS, SQL_DELETE_NOTE_LOGS,
   SQL_DELETE_NOTE_SCHED, SQL_DUE_CARDS, SQL_DUE_CARDS_IN_DECK, SQL_DUE_FORECAST,
@@ -250,6 +251,18 @@ export class Database {
   /** 新卡总数 */
   newCount(): number {
     return this.scalar(SQL_COUNT_NEW, []);
+  }
+
+  /** 某卡组(0 = 全部)此刻到期的卡数。只要数字时用它,不要取 id 列表再数 */
+  dueCountInDeck(deckId: number, now: number): number {
+    return this.scalar(SQL_COUNT_DUE_IN_DECK,
+      [now, deckId, deckId] as Array<relationalStore.ValueType>);
+  }
+
+  /** 某卡组(0 = 全部)还没学过的卡数,不设上限 */
+  newCountInDeck(deckId: number): number {
+    return this.scalar(SQL_COUNT_NEW_IN_DECK,
+      [deckId, deckId] as Array<relationalStore.ValueType>);
   }
 
   /**

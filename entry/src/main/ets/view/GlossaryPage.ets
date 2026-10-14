@@ -24,6 +24,7 @@ import { ParsedCard, QuizifyError, parseOneCard, renderCloze } from '../data/Qui
 import { ImportResult, importFromPicker } from '../data/Importer';
 import { SK_BACK_REQ, SK_CAN_BACK, SK_GOTO_TAB, SK_LANG, SK_TICK, appStore } from '../store/AppStore';
 import { L, LANG_ZH, fmt } from '../i18n/Strings';
+import { ArrayDataSource } from './ArrayDataSource';
 import { BookCover } from './BookCover';
 import { MarkupText } from './MarkupText';
 import { MathText, hasMath } from './MathText';
@@ -52,6 +53,8 @@ export struct GlossaryPage {
 
   @State private mode: Mode = Mode.Home;
   @State private cards: CardBrief[] = [];
+  /** 卡片列表走 LazyForEach;内容与 cards 同步,行的 @Builder 仍按下标从 cards 取 */
+  private cardSource: ArrayDataSource<CardBrief> = new ArrayDataSource<CardBrief>();
   @State private status: string = '';
   @State private busy: boolean = false;
 
@@ -105,9 +108,10 @@ export struct GlossaryPage {
       this.deckId = st.currentDeckId;
       this.deckLabel = this.deckId === 0 ? L(this.lang).allDecks : db.deckName(this.deckId);
       this.cards = db.listCards(this.deckId);
+      this.cardSource.setData(this.cards);
       this.deckCards = this.cards.length;
-      this.deckDue = db.dueCardIdsInDeck(this.deckId, now, 100000).length;
-      this.deckNew = db.newCardIdsInDeck(this.deckId, 100000).length;
+      this.deckDue = db.dueCountInDeck(this.deckId, now);
+      this.deckNew = db.newCountInDeck(this.deckId);
     } catch (e) {
       this.status = fmt(L(this.lang).readFailed, `${e}`);
     }
@@ -660,19 +664,24 @@ export struct GlossaryPage {
             ListItem() {
               this.deckRow(idx as number)
             }
-          }, (d: DeckRow) => `${d.id}`)
+          // 同卡片列表:deckRow 按下标取数据,key 要带下标,删组后行才不会错位
+          }, (d: DeckRow, idx: number) => `${idx}:${d.id}`)
         }
         .layoutWeight(1).width('90%').margin({ top: 8 })
         .scrollBar(BarState.Auto)
       } else if (this.mode === Mode.CardList) {
         this.topBar(Mode.CardList)
         List({ space: 8 }) {
-          ForEach(this.cards, (c: CardBrief, idx?: number) => {
+          // 一本书可能上千张卡:LazyForEach 只建可视区 + cachedCount 那几行
+          LazyForEach(this.cardSource, (c: CardBrief, idx: number) => {
             ListItem() {
-              this.cardRow(idx as number)
+              this.cardRow(idx)
             }
-          }, (c: CardBrief) => `${c.cardId}`)
+          // 行的 @Builder 按下标取数据,所以 key 必须带上下标:
+          // 只用 cardId 的话,删掉前面一张卡后后面的行会被原样复用,下标却已经错位
+          }, (c: CardBrief, idx: number) => `${idx}:${c.cardId}`)
         }
+        .cachedCount(6)
         .layoutWeight(1).width('90%')
         .scrollBar(BarState.Auto)
       } else if (this.mode === Mode.Preview) {
