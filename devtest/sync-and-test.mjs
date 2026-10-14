@@ -100,6 +100,8 @@ const suites = [
   'stats_test.ts',
   'deckcounts_test.ts',
   'browse_test.ts',
+  'heatmap_test.ts',
+  'history_test.ts',
 ];
 
 for (const suite of suites) {

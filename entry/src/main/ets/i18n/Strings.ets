@@ -310,7 +310,7 @@ const ZH: Dict = {
 
  statsTitle: '统计', studyDays: '学习天数', streakDays: '连续天数',
   totalAnswers: '总作答', retentionRate: '保持率', masterySpread: '掌握度分布',
-  sectionAll: '全部牌组', sectionBook: '按牌组',
+  sectionAll: '综合统计', sectionBook: '进度统计',
   studyTime: '最近 7 天学习时长', minutesShort: '分',
   noTimeYet: '这 7 天还没有学习记录',
   noReviewYet: '还没有复习记录', weekdays: '日|一|二|三|四|五|六',
@@ -436,7 +436,7 @@ const EN: Dict = {
 
  statsTitle: 'Stats', studyDays: 'Days studied', streakDays: 'Streak',
   totalAnswers: 'Answers', retentionRate: 'Retention', masterySpread: 'Mastery spread',
-  sectionAll: 'All decks', sectionBook: 'By deck',
+  sectionAll: 'Overall', sectionBook: 'Progress',
   studyTime: 'Study time, last 7 days', minutesShort: 'm',
   noTimeYet: 'No study records in the last 7 days',
   noReviewYet: 'No reviews yet', weekdays: 'S|M|T|W|T|F|S',

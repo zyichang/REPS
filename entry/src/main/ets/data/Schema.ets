@@ -134,7 +134,8 @@ export const DDL: string[] = [
      retrievability   REAL    NOT NULL DEFAULT 0,
      interval_days    REAL    NOT NULL DEFAULT 0,
      cost_ms          INTEGER NOT NULL DEFAULT 0,
-     algo             TEXT    NOT NULL DEFAULT 'fsrs'
+     algo             TEXT    NOT NULL DEFAULT 'fsrs',
+     archived         INTEGER NOT NULL DEFAULT 0
    )`,
 
   // 队列查询是「按 due 取到期卡」,没有这个索引会全表扫
@@ -271,6 +272,20 @@ export const SQL_NEW_CARDS: string =
 /**
  * 老库检测:decks 还有没有 parent_id 这一列。列名必须叫 n(见 scalar)。
  */
+/**
+ * review_log 有没有 archived 列。旧库靠 Database.init() 里的 ALTER 补上 ——
+ * `CREATE TABLE IF NOT EXISTS` 对已存在的表不起作用。
+ *
+ * **复习流水永不删除**(ADR-0005):删牌组、删卡片都不删流水,综合统计
+ * (总作答、热力图、学习时长、连续天数、保持率)按整个应用算,与牌组是否还在无关。
+ * 「清空进度」只把该组的流水标成 archived = 1:综合统计照算,
+ * 这个牌组自己的「今日已学」等视图不再看它们。
+ */
+export const SQL_HAS_ARCHIVED_COL: string =
+  `SELECT COUNT(*) AS n FROM pragma_table_info('review_log') WHERE name = 'archived'`;
+export const MIGRATE_ADD_ARCHIVED: string =
+  `ALTER TABLE review_log ADD COLUMN archived INTEGER NOT NULL DEFAULT 0`;
+
 export const SQL_HAS_PARENT_COL: string =
   `SELECT COUNT(*) AS n FROM pragma_table_info('decks') WHERE name = 'parent_id'`;
 
@@ -382,15 +397,16 @@ export const SQL_REVIEWED_TODAY: string =
   `SELECT c.id AS card_id, n.id AS note_id, n.type, n.title, n.front, n.back,
           COALESCE(s.due, 0) AS due, COALESCE(s.reps, 0) AS reps,
           (SELECT r.grade FROM review_log r
-            WHERE r.card_id = c.id AND r.ts >= ?
+            WHERE r.card_id = c.id AND r.ts >= ? AND r.archived = 0
             ORDER BY r.ts DESC LIMIT 1) AS grade,
           (SELECT MAX(r.ts) FROM review_log r
-            WHERE r.card_id = c.id AND r.ts >= ?) AS last_ts
+            WHERE r.card_id = c.id AND r.ts >= ? AND r.archived = 0) AS last_ts
      FROM cards c
      JOIN notes n ON n.id = c.note_id
      LEFT JOIN scheduling s ON s.card_id = c.id
     WHERE (? = 0 OR n.deck_id = ?)
-      AND EXISTS (SELECT 1 FROM review_log r WHERE r.card_id = c.id AND r.ts >= ?)
+      AND EXISTS (SELECT 1 FROM review_log r
+                   WHERE r.card_id = c.id AND r.ts >= ? AND r.archived = 0)
     ORDER BY last_ts DESC
     LIMIT ?`;
 
@@ -517,9 +533,15 @@ export const SQL_NEW_CARDS_IN_DECK: string =
     WHERE n.deck_id = ? AND s.card_id IS NULL
     ORDER BY c.id ASC LIMIT ?`;
 
-/** 删除一个卡组连同它的笔记、卡片、排期与流水 */
-export const SQL_DELETE_DECK_LOGS: string =
-  `DELETE FROM review_log WHERE card_id IN
+/**
+ * 删除一个卡组连同它的笔记、卡片、排期。**复习流水不删**(ADR-0005)——
+ * 学过的时间和打卡是真实发生过的,综合统计要一直算进去。
+ * 卡片 id 是 AUTOINCREMENT,永不复用,所以留下的流水不会被新卡「认领」。
+ *
+ * 「清空进度」用 SQL_ARCHIVE_DECK_LOGS:把流水标成已归档,而不是删掉。
+ */
+export const SQL_ARCHIVE_DECK_LOGS: string =
+  `UPDATE review_log SET archived = 1 WHERE card_id IN
      (SELECT c.id FROM cards c JOIN notes n ON n.id = c.note_id WHERE n.deck_id = ?)`;
 export const SQL_DELETE_DECK_SCHED: string =
   `DELETE FROM scheduling WHERE card_id IN
@@ -569,9 +591,7 @@ export const SQL_UPDATE_NOTE_TEXT: string =
   `UPDATE notes SET type = ?, front = ?, back = ?, title = ?, options = ?, answer = ?,
           updated_at = ? WHERE id = ?`;
 
-/** 删一条笔记要先删子表 —— 本库没有开外键级联 */
-export const SQL_DELETE_NOTE_LOGS: string =
-  `DELETE FROM review_log WHERE card_id IN (SELECT id FROM cards WHERE note_id = ?)`;
+/** 删一条笔记要先删子表 —— 本库没有开外键级联。复习流水保留(ADR-0005) */
 export const SQL_DELETE_NOTE_SCHED: string =
   `DELETE FROM scheduling WHERE card_id IN (SELECT id FROM cards WHERE note_id = ?)`;
 export const SQL_DELETE_NOTE_CARDS: string = `DELETE FROM cards WHERE note_id = ?`;
@@ -624,6 +644,40 @@ export interface DayStat {
 export function dayAnchor(now: number): number {
   const d = new Date(now);
   return d.getTimezoneOffset() * MIN_MS + DAY_CUTOFF_MS;
+}
+
+/**
+ * 某个日序号是星期几,**周一 = 0 … 周日 = 6**(热力图按周一起头)。
+ * 取 dayStart(day) 那一刻(本地 01:00)的星期,日界口径与 dayIndex() 一致。
+ */
+export function weekdayMon0(day: number): number {
+  return (new Date(dayStart(day)).getDay() + 6) % 7;
+}
+
+/**
+ * 热力图第一格(左上角)的日序号。
+ *
+ * **网格必须按星期对齐**:行是 周一…周日,最后一列是本周,今天落在本周那一列
+ * 自己星期的那一行,今天之后的格子留空。早先的写法是「从今天往前数 weeks*7-1 天」
+ * 再按 7 个一列摆,于是今天总落在最后一列的最后一行(周日)——
+ * 周三学的显示成周日,整张图错位,上周日的 8 分钟跑到了别的格子里。
+ */
+export function heatFirstDay(today: number, weeks: number): number {
+  return today - weekdayMon0(today) - (weeks - 1) * 7;
+}
+
+/**
+ * 热力图的格子:按列(周)主序,每列 7 格(周一…周日)。
+ * 值是作答次数;**今天之后的格子是 -1**,界面画成透明,不算「没学」。
+ */
+export function heatCells(today: number, weeks: number, repsOf: (day: number) => number): number[] {
+  const first: number = heatFirstDay(today, weeks);
+  const out: number[] = [];
+  for (let i = 0; i < weeks * 7; i++) {
+    const day: number = first + i;
+    out.push(day > today ? -1 : repsOf(day));
+  }
+  return out;
 }
 
 /**

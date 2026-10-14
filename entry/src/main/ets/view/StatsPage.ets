@@ -19,7 +19,7 @@
  * 所以 day 的含义与 dayIndex()、与学习页的「今天」仍是同一个定义。
  */
 
-import { DayStat, DeckRow, dayAnchor, dayIndex } from '../data/Schema';
+import { DayStat, DeckRow, dayAnchor, dayIndex, heatCells } from '../data/Schema';
 import { MASTERY_COLOR } from '../model/Models';
 import { masteryOf } from '../srs/Srs';
 import { SK_LANG, SK_TICK, appStore } from '../store/AppStore';
@@ -90,7 +90,6 @@ export struct StatsPage {
       const db = st.getDb();
       const now: number = Date.now();
       const today: number = dayIndex(now);
-      const cells: number = WEEKS * 7;
       this.decks = db.listDecks(now);
       // 过滤的那一组被删了:回到全部
       if (this.filterDeck !== 0 && this.decks.every((d: DeckRow) => d.id !== this.filterDeck)) {
@@ -114,12 +113,8 @@ export struct StatsPage {
       this.studiedDays = days.length;
       this.retention = db.retentionAll();
 
-      const firstDay: number = today - cells + 1;
-      const heat: number[] = [];
-      for (let d = firstDay; d <= today; d++) {
-        heat.push(repsByDay.get(d) ?? 0);
-      }
-      this.heat = heat;
+      // 按星期对齐:最后一列是本周,今天之后为 -1(见 Schema.heatCells)
+      this.heat = heatCells(today, WEEKS, (d: number) => repsByDay.get(d) ?? 0);
 
       // 连续学习天数:从今天往回数,遇到 0 就停。全量,不再被窗口截断
       let streak = 0;
@@ -170,7 +165,10 @@ export struct StatsPage {
 
   /** 作答次数 -> 颜色深浅。0 次是空格,不是最浅的蓝 */
   private heatColor(n: number): string {
-    if (n <= 0) {
+    if (n < 0) {
+      return 'rgba(0,0,0,0)';     // 今天之后:还没到,不画
+    }
+    if (n === 0) {
       return '#EFEFF4';
     }
     if (n < 5) {
@@ -256,9 +254,11 @@ export struct StatsPage {
   /** 一段小标题 */
   @Builder
   sectionTitle(which: number) {
-    Column({ space: 2 }) {
+    // 两段的分界:上「综合统计」按整个应用算(删了的牌组也在内,ADR-0005),
+    // 下「进度统计」按所选牌组。标题用同一级字号,一眼看出是两块
+    Column({ space: 6 }) {
       Text(which === 0 ? L(this.lang).sectionAll : L(this.lang).sectionBook)
-        .fontSize(13).fontColor('#8A8A8E').width('100%')
+        .fontSize(17).fontWeight(FontWeight.Bold).fontColor('#1C1C1E').width('100%')
       if (which === 1) {
         Select(this.filterOptions())
           .selected(this.filterIndex())

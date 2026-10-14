@@ -73,7 +73,7 @@ check('scheduling 实际列与 SCHED_COLUMNS 一致',
   `实际 ${schedCols.join(',')}`);
 
 const logCols = (db.prepare(`PRAGMA table_info(review_log)`).all() as Array<{ name: string }>)
-  .map((c) => c.name).filter((c) => c !== 'id');
+  .map((c) => c.name).filter((c) => c !== 'id' && c !== 'archived');
 check('review_log 实际列与 LOG_COLUMNS 一致',
   logCols.join(',') === LOG_COLUMNS.join(','),
   `实际 ${logCols.join(',')}`);

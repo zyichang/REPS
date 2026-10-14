@@ -21,8 +21,9 @@ import {
   ReviewedCard, SQL_AHEAD_CARDS, SQL_AHEAD_CARDS_IN_DECK, SQL_COUNT_CARDS,
   SQL_COUNT_CARDS_IN_DECK, SQL_COUNT_DUE, SQL_COUNT_DUE_IN_DECK, SQL_COUNT_NEW,
   SQL_COUNT_NEW_IN_DECK, SQL_DAY_STATS, SQL_DECK_NOTE_COUNT,
-  SQL_DELETE_DECK, SQL_DELETE_DECK_CARDS, SQL_DELETE_DECK_LOGS, SQL_DELETE_DECK_NOTES,
-  SQL_DELETE_DECK_SCHED, SQL_DELETE_NOTE, SQL_DELETE_NOTE_CARDS, SQL_DELETE_NOTE_LOGS,
+  SQL_DELETE_DECK, SQL_DELETE_DECK_CARDS, SQL_ARCHIVE_DECK_LOGS, SQL_DELETE_DECK_NOTES,
+  MIGRATE_ADD_ARCHIVED, SQL_HAS_ARCHIVED_COL,
+  SQL_DELETE_DECK_SCHED, SQL_DELETE_NOTE, SQL_DELETE_NOTE_CARDS,
   SQL_DELETE_NOTE_SCHED, SQL_DUE_CARDS, SQL_DUE_CARDS_IN_DECK, SQL_DUE_FORECAST,
   SQL_DUE_FORECAST_IN_DECK, SQL_HAS_PARENT_COL, SQL_INSERT_CARD, SQL_INSERT_DECK,
   SQL_INSERT_LOG, SQL_INSERT_NOTE, SQL_LIST_CARDS_ALL, SQL_LIST_CARDS_IN_DECK, SQL_LIST_DECKS,
@@ -52,6 +53,7 @@ export class Database {
       await this.store.executeSql(stmt);
     }
     await this.flattenDecksIfNeeded();
+    await this.addArchivedIfNeeded();
     hilog.info(DOMAIN, TAG, '数据库就绪,已执行 %{public}d 条 DDL', DDL.length);
   }
 
@@ -88,6 +90,22 @@ export class Database {
       store.rollBack();
       hilog.error(DOMAIN, TAG, '拍平迁移失败,已回滚: %{public}s', `${e}`);
       throw new Error(`卡组拍平迁移失败: ${e}`);
+    }
+  }
+
+  /** 旧库补上 review_log.archived 列(ADR-0005)。判据是列在不在,重复启动不会再跑 */
+  private async addArchivedIfNeeded(): Promise<void> {
+    const store = this.db();
+    const rs = await store.querySql(SQL_HAS_ARCHIVED_COL);
+    let has = false;
+    try {
+      has = rs.goToFirstRow() && rs.getLong(rs.getColumnIndex('n')) > 0;
+    } finally {
+      rs.close();
+    }
+    if (!has) {
+      await store.executeSql(MIGRATE_ADD_ARCHIVED);
+      hilog.info(DOMAIN, TAG, 'review_log 已补 archived 列');
     }
   }
 
@@ -509,7 +527,7 @@ export class Database {
    */
   deleteDeck(deckId: number): void {
     const d = this.db();
-    d.executeSync(SQL_DELETE_DECK_LOGS, [deckId] as Array<relationalStore.ValueType>);
+    // 流水不删:综合统计按整个应用算(ADR-0005)
     d.executeSync(SQL_DELETE_DECK_SCHED, [deckId] as Array<relationalStore.ValueType>);
     d.executeSync(SQL_DELETE_DECK_CARDS, [deckId] as Array<relationalStore.ValueType>);
     d.executeSync(SQL_DELETE_DECK_NOTES, [deckId] as Array<relationalStore.ValueType>);
@@ -517,18 +535,19 @@ export class Database {
   }
 
   /**
-   * 清空一个卡组的学习进度:**删排期和复习流水,卡片本身一张不动。**
+   * 清空一个卡组的学习进度:**删排期、归档复习流水,卡片本身一张不动。**
    *
    * 清完之后这一组的卡全部变回「新卡」 —— 因为「是不是新卡」看的就是
-   * 有没有 scheduling 行。热力图里属于这一组的历史也会一起消失,
-   * 那是有意的:留着会让统计和实际进度对不上。
+   * 有没有 scheduling 行。流水不删(ADR-0005):花掉的时间和打卡是真实的,
+   * 综合统计照算;只是这一组的「今日已学」不再看到它们。
    *
    * 这是**不可撤销**的操作,调用方必须先让用户确认。
    */
   clearDeckProgress(deckId: number): void {
     const d = this.db();
     const a: Array<relationalStore.ValueType> = [deckId] as Array<relationalStore.ValueType>;
-    d.executeSync(SQL_DELETE_DECK_LOGS, a);
+    // 流水只归档不删:时间与打卡仍计入综合统计,本组「今日已学」不再看它们
+    d.executeSync(SQL_ARCHIVE_DECK_LOGS, a);
     d.executeSync(SQL_DELETE_DECK_SCHED, a);
   }
 
@@ -589,7 +608,6 @@ export class Database {
   deleteNote(noteId: number): void {
     const d = this.db();
     const a: Array<relationalStore.ValueType> = [noteId] as Array<relationalStore.ValueType>;
-    d.executeSync(SQL_DELETE_NOTE_LOGS, a);
     d.executeSync(SQL_DELETE_NOTE_SCHED, a);
     d.executeSync(SQL_DELETE_NOTE_CARDS, a);
     d.executeSync(SQL_DELETE_NOTE, a);

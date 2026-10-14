@@ -13,7 +13,7 @@ import {
   DDL, SQL_AHEAD_CARDS, SQL_AHEAD_CARDS_IN_DECK, SQL_NEW_INTRODUCED_TODAY,
   SQL_COUNT_CARDS_IN_DECK,
   SQL_TODAY_PROGRESS, SQL_UNLEARNED_COUNT, SQL_UNTOUCHED_DUE, SQL_DELETE_NOTE, SQL_DELETE_NOTE_CARDS,
-  SQL_DELETE_NOTE_LOGS, SQL_DELETE_NOTE_SCHED, SQL_LIST_CARDS_ALL, SQL_LIST_CARDS_IN_DECK,
+  SQL_DELETE_NOTE_SCHED, SQL_LIST_CARDS_ALL, SQL_LIST_CARDS_IN_DECK,
   SQL_UPDATE_NOTE_TEXT,
 } from './Schema';
 
@@ -133,7 +133,7 @@ check('改写内容不影响排期行', schedStill.n === 1, `${schedStill.n}`);
 db.exec(`INSERT INTO review_log (card_id, ts, grade, stability_before, elapsed_days,
          retrievability, interval_days, cost_ms, algo)
          VALUES (1, 1500, 3, 3.2, 1.0, 0.9, 5.0, 4200, 'fsrs')`);
-for (const sql of [SQL_DELETE_NOTE_LOGS, SQL_DELETE_NOTE_SCHED, SQL_DELETE_NOTE_CARDS, SQL_DELETE_NOTE]) {
+for (const sql of [SQL_DELETE_NOTE_SCHED, SQL_DELETE_NOTE_CARDS, SQL_DELETE_NOTE]) {
   db.prepare(sql).run(1);
 }
 const left = db.prepare(`SELECT
@@ -144,7 +144,7 @@ const left = db.prepare(`SELECT
 check('笔记被删掉', left.n === 0, `${left.n}`);
 check('卡片被删掉', left.c === 0, `${left.c}`);
 check('排期被删掉', left.s === 0, `${left.s}`);
-check('复习流水被删掉', left.l === 0, `${left.l}`);
+check('**复习流水保留**(综合统计按整个应用算,ADR-0005)', left.l === 1, `${left.l}`);
 
 const survivor = db.prepare(`SELECT COUNT(*) AS n FROM notes WHERE id = 2`).get() as Record<string, number>;
 check('别的笔记没被连带删掉', survivor.n === 1, `${survivor.n}`);
