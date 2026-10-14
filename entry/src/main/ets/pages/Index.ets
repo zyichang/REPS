@@ -18,7 +18,7 @@ import { L, LANG_ZH, fmt } from '../i18n/Strings';
 import { GlossaryPage } from '../view/GlossaryPage';
 import { ProfilePage } from '../view/ProfilePage';
 import { StatsPage } from '../view/StatsPage';
-import { StudyPage } from '../view/StudyPage';
+import { StudyTab } from '../view/StudyTab';
 
 const DOMAIN: number = 0x0A01;
 const TAG: string = 'REPS-Index';
@@ -60,7 +60,9 @@ struct Index {
    * 已经在顶层了才交给系统(返回 false)。
    */
   onBackPress(): boolean {
-    if (this.canBack) {
+    // 只有词卡表还用「返回计数器」。学习页用 Navigation,返回交给它自己弹栈;
+    // 不加这个判断的话,词卡表留下的 canBack 会在学习页上截走返回
+    if (this.current === 2 && this.canBack) {
       this.backReq = this.backReq + 1;
       return true;
     }
@@ -203,7 +205,7 @@ struct Index {
       } else {
         Tabs({ barPosition: BarPosition.End, index: this.current }) {
           TabContent() {
-            StudyPage()
+            StudyTab()
           }.tabBar(this.tabItem(0))
 
           TabContent() {

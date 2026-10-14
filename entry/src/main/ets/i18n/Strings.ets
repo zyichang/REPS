@@ -21,6 +21,13 @@ export interface Dict {
   tabGlossary: string;
   tabMe: string;
 
+  // ---- 牌组列表(学习页的根) ----
+  deckListTitle: string;
+  deckListEmpty: string;
+  colNew: string;
+  colLearn: string;
+  colDue: string;
+
   // ---- 学习页 ----
   appName: string;
   toLearn: string;
@@ -217,6 +224,10 @@ export interface Dict {
 const ZH: Dict = {
   tabStudy: '学习', tabStats: '统计', tabGlossary: '词卡表', tabMe: '我的',
 
+  deckListTitle: '牌组',
+  deckListEmpty: '还没有牌组 —— 导入一个 Markdown 或 YAML 文件就能开始',
+  colNew: '新', colLearn: '学习中', colDue: '待复习',
+
   appName: '刻意重复',
   toLearn: '待学习', toReview: '待复习', learning: '学习中',
   startLearning: '开始学习', change: '切换', allDecks: '全部卡组',
@@ -336,6 +347,10 @@ const ZH: Dict = {
 
 const EN: Dict = {
   tabStudy: 'Learn', tabStats: 'Stats', tabGlossary: 'Glossary', tabMe: 'Me',
+
+  deckListTitle: 'Decks',
+  deckListEmpty: 'No decks yet — import a Markdown or YAML file to start',
+  colNew: 'New', colLearn: 'Learn', colDue: 'Due',
 
   appName: 'REPS',
   toLearn: 'To learn', toReview: 'To review', learning: 'Learning',

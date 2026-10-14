@@ -14,8 +14,9 @@ import { CardState, GRADE_COLOR, Grade, LearnPhase, NoteType } from '../model/Mo
 import { MarkupText } from './MarkupText';
 import { MathText, hasMath } from './MathText';
 import { BookCover } from './BookCover';
+import { COLOR_DUE, COLOR_LEARN, COLOR_NEW } from './DeckColors';
 import {
-  SK_BACK_REQ, SK_CAN_BACK, SK_GOTO_TAB, SK_IMMERSIVE, SK_LANG, SK_TICK, appStore,
+  SK_IMMERSIVE, SK_LANG, SK_TICK, appStore,
 } from '../store/AppStore';
 import { L, LANG_ZH, fmt, gradeLabels, phaseLabels } from '../i18n/Strings';
 import { formatInterval, newCardState, schedule } from '../srs/Srs';
@@ -69,11 +70,8 @@ export struct StudyPage {
   @State private aheadNote: string = '';
   /** 语言。界面文字跟随它;卡片内容永不翻译 */
   @StorageLink(SK_LANG) lang: string = LANG_ZH;
-  /** 会话中时可以返回落地页,而不是退出应用 */
-  @StorageLink(SK_CAN_BACK) canBack: boolean = false;
   /** 会话中为真,Index 据此隐藏标签栏 */
   @StorageLink(SK_IMMERSIVE) immersive: boolean = false;
-  @StorageLink(SK_BACK_REQ) @Watch('onBackReq') backReq: number = 0;
   @State private status: string = '';
   @State private totalCards: number = 0;
   @State private dueCards: number = 0;
@@ -129,14 +127,14 @@ export struct StudyPage {
   private queue: number[] = [];
 
   /**
-   * 要学的卡组。由外层传入 —— 学习页不再自己去读「当前卡组」。
-   * -1 表示外层还没传(过渡期),退回到全局当前卡组。
-   * **@Watch 必须有**:外层换卡组时 ArkUI 复用实例、只更新 @Prop,不会再调 aboutToAppear。
+   * 要学的卡组。由牌组列表 push 进来时传入 —— 学习页不再有「当前卡组」的概念,
+   * 每个卡组各开各的一页(Anki 的 Overview)。
+   * **@Watch 必须有**:外层换值时 ArkUI 复用实例、只更新 @Prop,不会再调 aboutToAppear。
    */
-  @Prop @Watch('onDeckChange') deckId: number = -1;
+  @Prop @Watch('onDeckChange') deckId: number = 0;
 
   private scopeDeck(): number {
-    return this.deckId >= 0 ? this.deckId : appStore().currentDeckId;
+    return this.deckId;
   }
 
   onDeckChange(): void {
@@ -156,21 +154,28 @@ export struct StudyPage {
     }
   }
 
-  /** 计数一律从数据库重算,内存不另存一份 */
-  onBackReq(): void {
-    if (this.stage !== Stage.Landing) {
-      this.refresh();
-      this.stage = Stage.Landing;
-      this.publishDepth();
-      this.aheadNote = '';
-      this.publishDepth();
+  /**
+   * 系统返回 / 标题栏返回。
+   *
+   * 学习中或做完那一屏:先回本卡组的概览(已答的卡早已逐张落库,不会丢);
+   * 已经在概览了:返回 false,让 Navigation 弹回牌组列表。
+   * 计数一律从数据库重算,内存不另存一份。
+   */
+  private onNavBack(): boolean {
+    if (this.stage === Stage.Landing) {
+      return false;
     }
+    this.stopTimer();
+    this.cancelAutoNext();
+    this.refresh();
+    this.stage = Stage.Landing;
+    this.aheadNote = '';
+    this.publishDepth();
+    return true;
   }
 
-  /** 学习中或做完时都还有上一级(落地页),顶层才放行退出 */
+  /** 卡片阶段才沉浸(藏标签栏)。概览和做完那一屏留着标签栏 */
   private publishDepth(): void {
-    this.canBack = this.stage !== Stage.Landing;
-    // 卡片阶段才沉浸。做完那一屏留着标签栏,方便直接去别处
     this.immersive = this.stage === Stage.Card;
   }
 
@@ -298,6 +303,8 @@ export struct StudyPage {
   aboutToDisappear(): void {
     this.stopTimer();
     this.cancelAutoNext();
+    // 离开这个卡组:让牌组列表等页面按新进度重算
+    appStore().bump();
     // **必须解除沉浸**,否则切走之后标签栏再也不出现
     this.immersive = false;
   }
@@ -502,6 +509,7 @@ export struct StudyPage {
       this.refresh();
       this.stage = Stage.Done;
       this.publishDepth();
+      appStore().bump();
       return;
     }
     const id: number = this.queue.shift() as number;
@@ -592,13 +600,6 @@ export struct StudyPage {
       .onClick(() => { this.commit(grade as Grade); this.nextCard(); })
   }
 
-  /**
-   * 「change」:切到卡组页去选。不在这里再做一个选择器 ——
-   * 卡组页已经有完整的列表、进度和「设为当前」,复制一份必然走样。
-   */
-  private onChangeDeck(): void {
-    AppStorage.setOrCreate(SK_GOTO_TAB, 2);
-  }
 
 
   /**
@@ -745,17 +746,10 @@ export struct StudyPage {
             .layoutWeight(2)
 
             Column({ space: 10 }) {
-              Row() {
-                Text(this.deckLabel)
-                  .fontSize(17).fontWeight(FontWeight.Bold).layoutWeight(1)
-                  .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-                Text(L(this.lang).change)
-                  .fontSize(12).fontColor('#3B82F6')
-                  .padding({ left: 8, right: 8, top: 3, bottom: 3 })
-                  .borderRadius(6).backgroundColor('#EAF1FE')
-                  .onClick(() => this.onChangeDeck())
-              }
-              .width('100%')
+              // 换卡组走「返回 → 牌组列表」,概览页不再有「切换」
+              Text(this.deckLabel)
+                .fontSize(17).fontWeight(FontWeight.Bold).width('100%')
+                .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
 
               this.progressBar()
 
@@ -766,21 +760,21 @@ export struct StudyPage {
               Row({ space: 8 }) {
                 Column({ space: 2 }) {
                   Text(`${this.newCards}`).fontSize(17).fontWeight(FontWeight.Bold)
-                    .fontColor('#3B82F6')
+                    .fontColor(COLOR_NEW)
                   Text(L(this.lang).toLearn).fontSize(11).fontColor('#8A8A8E')
                 }
                 .layoutWeight(1).alignItems(HorizontalAlign.Start)
 
                 Column({ space: 2 }) {
                   Text(`${this.dueCards}`).fontSize(17).fontWeight(FontWeight.Bold)
-                    .fontColor('#E5544B')
+                    .fontColor(COLOR_DUE)
                   Text(L(this.lang).toReview).fontSize(11).fontColor('#8A8A8E')
                 }
                 .layoutWeight(1).alignItems(HorizontalAlign.Start)
 
                 Column({ space: 2 }) {
                   Text(`${this.pAgain}`).fontSize(17).fontWeight(FontWeight.Bold)
-                    .fontColor('#9AA3B0')
+                    .fontColor(COLOR_LEARN)
                   Text(L(this.lang).learning).fontSize(11).fontColor('#8A8A8E')
                 }
                 .layoutWeight(1).alignItems(HorizontalAlign.Start)
@@ -1110,16 +1104,26 @@ export struct StudyPage {
     }
   }
 
+  /**
+   * 根节点是 NavDestination:本页由牌组列表的 NavPathStack push 进来。
+   * 作答时藏掉标题栏(和标签栏一起),给一个干净的作答界面。
+   */
   build() {
-    Column() {
-      if (this.stage === Stage.Landing) {
-        this.landing()
-      } else if (this.stage === Stage.Card) {
-        this.cardView()
-      } else {
-        this.done()
+    NavDestination() {
+      Column() {
+        if (this.stage === Stage.Landing) {
+          this.landing()
+        } else if (this.stage === Stage.Card) {
+          this.cardView()
+        } else {
+          this.done()
+        }
       }
+      .width('100%').height('100%').backgroundColor('#FFFFFF')
     }
-    .width('100%').height('100%').backgroundColor('#FFFFFF')
+    .title(this.deckLabel)
+    .hideTitleBar(this.stage === Stage.Card)
+    .backgroundColor('#F2F2F7')
+    .onBackPressed(() => this.onNavBack())
   }
 }
