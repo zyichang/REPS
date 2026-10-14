@@ -122,6 +122,8 @@ export struct StudyPage {
   @State private sesMs: number = 0;
   /** 计时器句柄。离开卡片阶段必须清掉,否则后台一直在跑 */
   private timer: number = -1;
+  /** 答对后自动翻页的那个 setTimeout。离开页面时要清掉,否则会在后台翻一张卡 */
+  private autoNextTimer: number = -1;
   @State private busy: boolean = false;
 
   private queue: number[] = [];
@@ -278,6 +280,7 @@ export struct StudyPage {
 
   aboutToDisappear(): void {
     this.stopTimer();
+    this.cancelAutoNext();
     // **必须解除沉浸**,否则切走之后标签栏再也不出现
     this.immersive = false;
   }
@@ -430,12 +433,21 @@ export struct StudyPage {
    */
   private afterJudge(correct: boolean): void {
     if (correct && appStore().autoNext) {
-      setTimeout(() => {
+      this.cancelAutoNext();
+      this.autoNextTimer = setTimeout(() => {
+        this.autoNextTimer = -1;
         // 这 0.3 秒里用户可能已手动点了「下一个」,nextCard 会把 judged 清成 0
         if (this.judged !== 0 && this.stage === Stage.Card) {
           this.nextCard();
         }
       }, AUTO_NEXT_MS);
+    }
+  }
+
+  private cancelAutoNext(): void {
+    if (this.autoNextTimer !== -1) {
+      clearTimeout(this.autoNextTimer);
+      this.autoNextTimer = -1;
     }
   }
 
@@ -466,6 +478,8 @@ export struct StudyPage {
   }
 
   private nextCard(): void {
+    // 手动点了「下一个」就作废还没触发的自动翻页,否则它可能把新卡也翻掉
+    this.cancelAutoNext();
     this.revealed = false;
     if (this.queue.length === 0) {
       this.refresh();
