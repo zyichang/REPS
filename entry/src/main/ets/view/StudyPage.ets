@@ -13,7 +13,6 @@ import {
 import { CardState, GRADE_COLOR, Grade, LearnPhase, NoteType } from '../model/Models';
 import { MarkupText } from './MarkupText';
 import { MathText, hasMath } from './MathText';
-import { BookCover } from './BookCover';
 import { COLOR_DUE, COLOR_LEARN, COLOR_NEW } from './DeckColors';
 import {
   SK_IMMERSIVE, SK_LANG, SK_TICK, appStore,
@@ -737,52 +736,40 @@ export struct StudyPage {
   landing() {
     Scroll() {
       Column({ space: 14 }) {
-        // ---- 课本卡:封面 + 书名 + 进度条 + 两个数字 ----
-        Column() {
-          Row({ space: 14 }) {
-            Column() {
-              BookCover({ tint: '#3B82F6', spine: '#2563EB' })
+        // ---- 牌组卡:名字 + 进度条 + 三个数字,铺满整行(不再有书本封面) ----
+        Column({ space: 12 }) {
+          // 换卡组走「返回 → 牌组列表」,概览页不再有「切换」
+          Text(this.deckLabel)
+            .fontSize(19).fontWeight(FontWeight.Bold).width('100%')
+            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+
+          this.progressBar()
+
+          /*
+           * 三个数字对应三段:待学习 + 待复习 = 白,学习中 = 灰。
+           * 颜色与牌组列表那三列一致(DeckColors)。
+           */
+          Row({ space: 8 }) {
+            Column({ space: 2 }) {
+              Text(`${this.newCards}`).fontSize(20).fontWeight(FontWeight.Bold)
+                .fontColor(COLOR_NEW)
+              Text(L(this.lang).toLearn).fontSize(12).fontColor('#8A8A8E')
             }
-            .layoutWeight(2)
+            .layoutWeight(1).alignItems(HorizontalAlign.Start)
 
-            Column({ space: 10 }) {
-              // 换卡组走「返回 → 牌组列表」,概览页不再有「切换」
-              Text(this.deckLabel)
-                .fontSize(17).fontWeight(FontWeight.Bold).width('100%')
-                .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-
-              this.progressBar()
-
-              /*
-               * 三个数字对应三段:待学习 + 待复习 = 白,学习中 = 灰。
-               * 颜色也对上 —— 学习中用灰条那个颜色,不然用户得自己猜哪个对哪个。
-               */
-              Row({ space: 8 }) {
-                Column({ space: 2 }) {
-                  Text(`${this.newCards}`).fontSize(17).fontWeight(FontWeight.Bold)
-                    .fontColor(COLOR_NEW)
-                  Text(L(this.lang).toLearn).fontSize(11).fontColor('#8A8A8E')
-                }
-                .layoutWeight(1).alignItems(HorizontalAlign.Start)
-
-                Column({ space: 2 }) {
-                  Text(`${this.dueCards}`).fontSize(17).fontWeight(FontWeight.Bold)
-                    .fontColor(COLOR_DUE)
-                  Text(L(this.lang).toReview).fontSize(11).fontColor('#8A8A8E')
-                }
-                .layoutWeight(1).alignItems(HorizontalAlign.Start)
-
-                Column({ space: 2 }) {
-                  Text(`${this.pAgain}`).fontSize(17).fontWeight(FontWeight.Bold)
-                    .fontColor(COLOR_LEARN)
-                  Text(L(this.lang).learning).fontSize(11).fontColor('#8A8A8E')
-                }
-                .layoutWeight(1).alignItems(HorizontalAlign.Start)
-              }
-              .width('100%')
+            Column({ space: 2 }) {
+              Text(`${this.dueCards}`).fontSize(20).fontWeight(FontWeight.Bold)
+                .fontColor(COLOR_DUE)
+              Text(L(this.lang).toReview).fontSize(12).fontColor('#8A8A8E')
             }
-            .layoutWeight(7)
-            .alignItems(HorizontalAlign.Start)
+            .layoutWeight(1).alignItems(HorizontalAlign.Start)
+
+            Column({ space: 2 }) {
+              Text(`${this.pAgain}`).fontSize(20).fontWeight(FontWeight.Bold)
+                .fontColor(COLOR_LEARN)
+              Text(L(this.lang).learning).fontSize(12).fontColor('#8A8A8E')
+            }
+            .layoutWeight(1).alignItems(HorizontalAlign.Start)
           }
           .width('100%')
         }
