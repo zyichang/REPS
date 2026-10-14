@@ -30,6 +30,7 @@ REPS 想把这条链路做成普通人愿意每天打开的样子。
 | 主题色 | 黑白蓝:主色蓝 `#3B82F6`(按下 `#2563EB`、浅底 `#EAF1FE`),深色 `#0B0D12`;绿 `#10B981` 只表示「答对 / 掌握」(2026-10-11 起,替换微信绿 `#07C160`) | 用户觉得纯绿单调,改为与新图标(黑底白蓝书)一致 |
 | 账号登录 | **已移除**(2026-10-10) | 不做账号。换华为手机时的记录迁移改走:整库导出/导入文件(主)+ BackupExtensionAbility 系统备份/手机克隆(附带,侧载应用是否生效待真机验证)。另需一张永不删除的「每日汇总」表 —— 目前删卡组会连带删掉它的 review_log,时长与打卡天数随之丢失。均为后续任务 |
 | 账号同步 | 本阶段不做,只预留 `uuid` / `updated_at` 字段 | 登录必然需要服务端,但可以让华为账号或用户自己的网盘来当那个服务端 —— 自建服务器的真实成本是 ICP 备案与《个人信息保护法》义务,不是机器钱 |
+| 牌组结构 | **Anki 式多牌组,没有「当前卡组」**(2026-10-14,ADR-0004) | 学习页列出所有牌组,各学各的;浏览页是 Anki 式浏览器;每日上限对每组各算一份;牌组暂保持扁平 |
 | 许可 | MIT | 注意 Anki 是 AGPL-3.0,**不要移植它的代码** |
 | 数据 | 本地优先,可整库导出 | |
 
@@ -154,24 +155,44 @@ Error 子类型再抛,例如 `throw new QuizifyError(\`…: ${detail}\`, line)`�
   而 WordSnap 最终只给了三个按钮。REPS 用几个还没定
 - 同步方案:用户自带存储(WebDAV/坚果云)还是华为账号 + AGC
 
-## 代码地图(截至 Task 2)
+## 代码地图(截至 2026-10-14,Anki 式多牌组之后)
+
+结构见 ADR-0004:学习页根是牌组列表,浏览页是 Anki 式浏览器,**没有「当前卡组」**。
 
 ```
 entry/src/main/ets/
-├── model/Models.ets       领域类型:Deck / Note / Card / CardState / ReviewLog / Grade / NoteType
-├── srs/Srs.ets            FSRS-6(701 行,自 WordSnap 移植)
-├── srs/Ebbinghaus.ets     固定阶梯(125 行)
-├── entryability/          应用入口
-└── pages/Index.ets        首页
+├── entryability/EntryAbility.ets  入口;设置键盘避让 RESIZE
+├── pages/Index.ets         四个标签:学习 / 统计 / 浏览 / 我的;只有「我的」用返回计数器
+├── view/StudyTab.ets       学习页根:牌组列表(Navigation + NavPathStack),⋯ 清空/删除,导入
+├── view/StudyPage.ets      一个牌组的页面(NavDestination):概览 → 作答 → 做完
+├── view/BrowserTab.ets     浏览器:卡组过滤 + 搜索 + 列表 → 预览 → 编辑 / 新建
+├── view/StatsPage.ets      统计:上半段全部,下半段按所选牌组(默认全部)
+├── view/ProfilePage.ets    设置:算法、今日集合、格式、语言
+├── view/DeckColors.ets     新 / 学习中 / 待复习 三色,列表与概览共用
+├── view/ArrayDataSource.ets LazyForEach 的数据源
+├── view/MarkupText / MathText / BookCover
+├── data/Schema.ets         DDL + 全部 SQL + 纯函数(deckCounts 的 applyDeckLimits、escapeLike)
+├── data/Database.ets       relationalStore 封装
+├── data/Quizify / Yaml / Inline / Importer   解析与导入
+├── store/AppStore.ets      数据库连接 + 全局设置 + SK_TICK 重绘计数
+├── srs/Srs.ets             FSRS-6;srs/Ebbinghaus.ets 固定阶梯
+└── i18n/Strings.ets        中英文案(两个字典字段必须一一对应)
 
-devtest/                   桌面测试台,不需要模拟器
+devtest/                   桌面测试台,不需要模拟器(14 套)
 ├── sync-and-test.mjs      把生产 .ets 同步成 .ts 再跑 —— 测的是生产文件本身
+├── deckcounts_test.ts     牌组列表计数 vs 概览页逐组查询,逐列对拍
+├── browse_test.ts         浏览器搜索:过滤、% _ \ 字面量、中文
 ├── check-encoding.mjs     中文编码守卫(BOM / U+FFFD / mojibake)
 ├── check-manifest.mjs     36 项清单检查,含解包 HAP 抽查字节码
-├── srs_test.ts            150 条断言
-├── ebbinghaus_test.ts     18 条断言
-└── interval_demo.ts       打印真实间隔阶梯(非测试)
+└── …                      srs / ebbinghaus / schema / parser / cards / stats 等
 ```
+
+**Navigation 的坑:** `navDestination` 必须传**顶层 `@Builder` 函数**,内联 lambda
+过不了 strict 编译;路由页根节点是 `NavDestination`,返回用 `.onBackPressed()`
+(返回 true 表示自己处理了,比如作答中先回概览)。
+
+**`fmt` 按顺序填占位符**,中英两个模板的参数顺序必须一致 —— 清空进度的确认文案
+曾因中文是 `%s %d`、调用传 `(张数, 名字)` 而显示成「「21」的 Miscellaneous 张卡」。
 
 两条硬约束:
 
