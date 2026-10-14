@@ -16,7 +16,8 @@ import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { CardState, NoteType, ReviewLog } from '../model/Models';
 import {
-  BrowseRow, CardBrief, DDL, DayStat, SQL_BROWSE, SQL_BROWSE_COUNT, browseArgs, browseCountArgs, DeckCountRow, DeckCounts, DeckRow, LogPoint, SQL_DECK_COUNTS,
+  BrowseRow, CardBrief, DDL, META_BACKFILL_CHECKINS, MIGRATE_BACKFILL_CHECKINS, SQL_CHECKIN_DAYS,
+  SQL_INSERT_CHECKIN, SQL_IS_CHECKED_IN, SQL_META_GET, SQL_META_SET, dayAnchor, DayStat, SQL_BROWSE, SQL_BROWSE_COUNT, browseArgs, browseCountArgs, DeckCountRow, DeckCounts, DeckRow, LogPoint, SQL_DECK_COUNTS,
   applyDeckLimits, dayIndex, dayStart, MIGRATE_FLATTEN_DECKS, ReviewCardRow,
   ReviewedCard, SQL_AHEAD_CARDS, SQL_AHEAD_CARDS_IN_DECK, SQL_COUNT_CARDS,
   SQL_COUNT_CARDS_IN_DECK, SQL_COUNT_DUE, SQL_COUNT_DUE_IN_DECK, SQL_COUNT_NEW,
@@ -54,6 +55,7 @@ export class Database {
     }
     await this.flattenDecksIfNeeded();
     await this.addArchivedIfNeeded();
+    await this.backfillCheckinsOnce();
     hilog.info(DOMAIN, TAG, '数据库就绪,已执行 %{public}d 条 DDL', DDL.length);
   }
 
@@ -107,6 +109,52 @@ export class Database {
       await store.executeSql(MIGRATE_ADD_ARCHIVED);
       hilog.info(DOMAIN, TAG, 'review_log 已补 archived 列');
     }
+  }
+
+  /**
+   * 打卡功能上线前的日子:有作答就算打过卡(一次性,meta 标记)。
+   * 不回填的话老用户的「学习天数」会从 0 开始。
+   */
+  private async backfillCheckinsOnce(): Promise<void> {
+    const store = this.db();
+    const rs = await store.querySql(SQL_META_GET, [META_BACKFILL_CHECKINS]);
+    let done = false;
+    try {
+      done = rs.goToFirstRow() && rs.getLong(rs.getColumnIndex('n')) > 0;
+    } finally {
+      rs.close();
+    }
+    if (done) {
+      return;
+    }
+    await store.executeSql(MIGRATE_BACKFILL_CHECKINS, [dayAnchor(Date.now())]);
+    await store.executeSql(SQL_META_SET, [META_BACKFILL_CHECKINS, `${Date.now()}`]);
+    hilog.info(DOMAIN, TAG, '已按作答记录回填打卡');
+  }
+
+  // ------------------------------------------------------------ 打卡
+
+  /** 给某一天打卡。重复打卡无效果;**没有撤销** */
+  checkIn(day: number, now: number): void {
+    this.db().executeSync(SQL_INSERT_CHECKIN, [day, now] as Array<relationalStore.ValueType>);
+  }
+
+  isCheckedIn(day: number): boolean {
+    return this.scalar(SQL_IS_CHECKED_IN, [day] as Array<relationalStore.ValueType>) > 0;
+  }
+
+  /** 全部打卡日(日序号,升序) */
+  checkinDays(): number[] {
+    const rs = this.db().querySqlSync(SQL_CHECKIN_DAYS);
+    const out: number[] = [];
+    try {
+      while (rs.goToNextRow()) {
+        out.push(rs.getLong(rs.getColumnIndex('day')));
+      }
+    } finally {
+      rs.close();
+    }
+    return out;
   }
 
   private db(): relationalStore.RdbStore {

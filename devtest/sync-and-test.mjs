@@ -102,6 +102,7 @@ const suites = [
   'browse_test.ts',
   'heatmap_test.ts',
   'history_test.ts',
+  'checkin_test.ts',
 ];
 
 for (const suite of suites) {

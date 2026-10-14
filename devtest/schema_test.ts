@@ -195,29 +195,29 @@ const notYet = db.prepare(SQL_DUE_CARDS).all(999, 10) as Array<{ card_id: number
 check('未到期的卡不会被取出', notYet.length === 0);
 
 // ================================================================ 6. 日界
-console.log('\n=== 6. 凌晨 1 点日界 ===');
+console.log('\n=== 6. 凌晨 3 点日界 ===');
 
-check('DAY_CUTOFF_HOUR 是 1', DAY_CUTOFF_HOUR === 1);
-check('DAY_CUTOFF_MS = 1 小时', DAY_CUTOFF_MS === 60 * MIN_MS, `${DAY_CUTOFF_MS}`);
+check('DAY_CUTOFF_HOUR 是 3', DAY_CUTOFF_HOUR === 3);
+check('DAY_CUTOFF_MS = 3 小时', DAY_CUTOFF_MS === 3 * 60 * MIN_MS, `${DAY_CUTOFF_MS}`);
 
-// 用本地时间构造,因为 dayIndex 按本地时区归天
-const at0030 = new Date(2026, 0, 15, 0, 30, 0).getTime(); // 1/15 00:30 本地
-const at0130 = new Date(2026, 0, 15, 1, 30, 0).getTime(); // 1/15 01:30 本地
-const at2330 = new Date(2026, 0, 14, 23, 30, 0).getTime(); // 1/14 23:30 本地
+// 用户给的三个例子(本地时间)
+const ex1 = new Date(2026, 9, 14, 23, 51, 0).getTime();   // 10/14 23:51
+const ex2 = new Date(2026, 9, 15, 2, 59, 0).getTime();    // 10/15 02:59
+const ex3 = new Date(2026, 9, 15, 3, 1, 0).getTime();     // 10/15 03:01
+const oct14 = dayIndex(new Date(2026, 9, 14, 12, 0, 0).getTime());
+check('例 1:10/14 23:51 算 10/14', dayIndex(ex1) === oct14);
+check('**例 2:10/15 02:59 仍算 10/14**', dayIndex(ex2) === oct14, `${dayIndex(ex2)} vs ${oct14}`);
+check('**例 3:10/15 03:01 算 10/15**', dayIndex(ex3) === oct14 + 1);
+check('恰好 03:00 是新一天的第一刻',
+  dayIndex(new Date(2026, 9, 15, 3, 0, 0).getTime()) === oct14 + 1);
+check('02:59:59 仍算前一天', dayIndex(new Date(2026, 9, 15, 2, 59, 59).getTime()) === oct14);
 
-check('00:30 与前一天 23:30 属于同一天(关键:没被午夜切开)',
-  dayIndex(at0030) === dayIndex(at2330), `${dayIndex(at0030)} vs ${dayIndex(at2330)}`);
-check('01:30 已属于新的一天', dayIndex(at0130) === dayIndex(at0030) + 1,
-  `${dayIndex(at0130)} vs ${dayIndex(at0030)}`);
-check('恰好 01:00 是新一天的第一刻',
-  dayIndex(new Date(2026, 0, 15, 1, 0, 0).getTime()) === dayIndex(at0130));
-check('00:59:59 仍算前一天',
-  dayIndex(new Date(2026, 0, 15, 0, 59, 59).getTime()) === dayIndex(at0030));
+const at0130 = new Date(2026, 0, 15, 4, 30, 0).getTime(); // 1/15 04:30 本地(已过日界)
 
 // dayStart 必须是 dayIndex 的逆
 const d = dayIndex(at0130);
 const start = dayStart(d);
-check('dayStart 落在当天 01:00', new Date(start).getHours() === 1, new Date(start).toString().slice(0, 24));
+check('dayStart 落在当天 03:00', new Date(start).getHours() === 3, new Date(start).toString().slice(0, 24));
 check('dayStart 与 dayIndex 互逆', dayIndex(start) === d, `${dayIndex(start)} vs ${d}`);
 check('dayStart 不晚于当天任何时刻', start <= at0130);
 check('相邻两天的分界正好相差一天', dayStart(d + 1) - dayStart(d) === DAY_MS);

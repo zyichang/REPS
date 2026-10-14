@@ -17,23 +17,26 @@ import { DAY_MS, MIN_MS } from '../srs/Srs';
 // ---------------------------------------------------------------- 日界
 
 /**
- * 一天的分界是凌晨 1 点,不是午夜。
+ * 一天的分界是**凌晨 3 点**,不是午夜(2026-10-14 起;原为 1 点)。
  *
  * 排期算出来的到期时刻带小时分钟(2.56 天后 = 次日 00:26)。按午夜切,
  * 深夜还在学的人刚过 0 点就会看到一批「明天的卡」冒出来。
+ * 打卡也按这个分界:10/15 02:59 打卡算 10/14,03:01 才算 10/15。
+ * **全应用只有这一个日界** —— 打卡单独用 3 点、其余用 1 点的话,凌晨 2 点
+ * 「今日」卡片已经显示新一天的待学,打卡却还记在前一天。(Anki 默认是 4 点。)
  *
  * 注意:这个分界只决定「一张卡属于哪一天」以及「今日集合怎么组成」。
  * **取卡条件仍然是 due <= now**。如果把分界也用到取卡上,
  * 5 分钟 / 30 分钟的学习步进卡会全部立刻到期,学习流水线就没了。
  */
-export const DAY_CUTOFF_HOUR: number = 1;
+export const DAY_CUTOFF_HOUR: number = 3;
 export const DAY_CUTOFF_MS: number = DAY_CUTOFF_HOUR * 60 * MIN_MS;
 
 /**
  * 本地日序号(以本地时区把毫秒归到「天」)。
  *
- * 减去 DAY_CUTOFF_MS 之后再取整:这样 00:00~01:00 会落回前一天,
- * 「一天」实际是 01:00 → 次日 01:00。
+ * 减去 DAY_CUTOFF_MS 之后再取整:这样 00:00~03:00 会落回前一天,
+ * 「一天」实际是 03:00 → 次日 03:00。
  */
 export function dayIndex(ms: number): number {
   const d = new Date(ms);
@@ -42,7 +45,7 @@ export function dayIndex(ms: number): number {
 }
 
 /**
- * 日序号 -> 当天的分界时刻(即当天凌晨 1 点)毫秒。dayIndex 的逆。
+ * 日序号 -> 当天的分界时刻(即当天凌晨 3 点)毫秒。dayIndex 的逆。
  *
  * 已知局限:时区偏移按 day*DAY_MS 那一刻取,夏令时切换当天会差一小时。
  * 目标时区(中国)不用夏令时,所以暂不处理。
@@ -145,7 +148,97 @@ export const DDL: string[] = [
   // 统计页按卡查历史、按时间查每日量,两个方向都要
   `CREATE INDEX IF NOT EXISTS idx_log_card ON review_log(card_id)`,
   `CREATE INDEX IF NOT EXISTS idx_log_ts ON review_log(ts)`,
+
+  // 打卡:一天一行,day 是 dayIndex() 的日序号(凌晨 3 点分界)。**永不删除,不能撤销**
+  `CREATE TABLE IF NOT EXISTS checkins (
+     day INTEGER PRIMARY KEY,
+     ts  INTEGER NOT NULL
+   )`,
+
+  // 一次性迁移的标记(key = 迁移名)。不用 preferences:迁移和数据在同一个库里才不会对不上
+  `CREATE TABLE IF NOT EXISTS meta (
+     key   TEXT PRIMARY KEY,
+     value TEXT NOT NULL DEFAULT ''
+   )`,
 ];
+
+// ---------------------------------------------------------------- 打卡
+
+/** 打卡。同一天重复打卡什么都不做(INSERT OR IGNORE),第一次的时刻保留 */
+export const SQL_INSERT_CHECKIN: string = `INSERT OR IGNORE INTO checkins (day, ts) VALUES (?, ?)`;
+/** 某一天打过卡没有。列名必须叫 n */
+export const SQL_IS_CHECKED_IN: string = `SELECT COUNT(*) AS n FROM checkins WHERE day = ?`;
+/** 全部打卡日,升序 */
+export const SQL_CHECKIN_DAYS: string = `SELECT day FROM checkins ORDER BY day ASC`;
+
+/**
+ * 一次性回填:打卡功能上线之前,**有作答的日子一律算打过卡**,
+ * 否则老用户的「学习天数」会从 0 重新数。
+ * 参数是 dayAnchor(now)(与 SQL_DAY_STATS 同一个日界口径)。由 meta 里的标记保证只跑一次。
+ */
+export const MIGRATE_BACKFILL_CHECKINS: string =
+  `INSERT OR IGNORE INTO checkins (day, ts)
+     SELECT CAST((ts - ?) / 86400000 AS INTEGER) AS day, MIN(ts)
+       FROM review_log
+      GROUP BY day`;
+export const META_BACKFILL_CHECKINS: string = 'backfill_checkins_v1';
+export const SQL_META_GET: string = `SELECT COUNT(*) AS n FROM meta WHERE key = ?`;
+export const SQL_META_SET: string = `INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)`;
+
+/**
+ * 连续打卡天数。规则(用户定的):**漏一天不算中断,连漏两天才断。**
+ *
+ * 从今天往回数,数的是链上**打过卡的天数**(周一 ✓、周二 ✗、周三 ✓ = 2)。
+ * 今天还没打卡不算「漏」—— 今天还没过完;从昨天开始数漏的天。
+ * days 是打卡日序号(任意顺序)。
+ */
+export function checkinStreak(days: number[], today: number): number {
+  const has = new Set<number>(days);
+  let earliest: number = today;
+  for (const x of days) {
+    if (x < earliest) {
+      earliest = x;
+    }
+  }
+  let count = 0;
+  let missed = 0;
+  // 今天没打卡 = 今天还没过完,不算漏;从昨天开始数
+  for (let d = has.has(today) ? today : today - 1; d >= earliest; d--) {
+    if (has.has(d)) {
+      count++;
+      missed = 0;
+    } else {
+      missed++;
+      if (missed >= 2) {
+        break;
+      }
+    }
+  }
+  return count;
+}
+
+/**
+ * 打卡月历的格子:从「这个月 1 号所在那一周的周日」开始,到「最后一天所在那一周的周六」,
+ * 所以首尾会带上相邻月份的几天(例如 27 28 29 30 | 1 2 3)。
+ * 返回每格的日序号;界面再用 calendarDate() 取「几号、是不是本月」。month0 是 0~11。
+ */
+export function calendarCells(year: number, month0: number): number[] {
+  const first: number = dayIndex(new Date(year, month0, 1, 12, 0, 0).getTime());
+  const last: number = dayIndex(new Date(year, month0 + 1, 0, 12, 0, 0).getTime());
+  const start: number = first - weekdaySun0(first);
+  const end: number = last + (6 - weekdaySun0(last));
+  const out: number[] = [];
+  for (let d = start; d <= end; d++) {
+    out.push(d);
+  }
+  return out;
+}
+
+/** 日序号 -> 本地日历上的 年 / 月(0~11)/ 日。取当天中午,远离日界与夏令时切换 */
+export function calendarDate(day: number): number[] {
+  const t: Date = new Date(dayStart(day) + 9 * 3600 * 1000);
+  return [t.getFullYear(), t.getMonth(), t.getDate()];
+}
 
 /** 合法的排期引擎取值。ReviewLog.algo 存 string,由这里兜底校验 */
 export const VALID_ALGOS: string[] = ['fsrs', 'ebbinghaus'];
@@ -602,7 +695,7 @@ export const SQL_DELETE_NOTE: string = `DELETE FROM notes WHERE id = ?`;
 /**
  * 按天聚合的复习量,供热力图使用。
  *
- * 分桶用的是**本地日序号**(dayIndex 的口径,凌晨 1 点分界),
+ * 分桶用的是**本地日序号**(dayIndex 的口径,凌晨 3 点分界),
  * 所以不能直接在 SQL 里按 UTC 除法分桶 —— 时区与 1 小时偏移都会错位。
  * 这里只把原始 (ts, grade) 取出来,分桶交给 dayIndex() 在 ArkTS 侧做,
  * 保证与界面上其他地方的「今天」是同一个定义。
@@ -647,27 +740,28 @@ export function dayAnchor(now: number): number {
 }
 
 /**
- * 某个日序号是星期几,**周一 = 0 … 周日 = 6**(热力图按周一起头)。
- * 取 dayStart(day) 那一刻(本地 01:00)的星期,日界口径与 dayIndex() 一致。
+ * 某个日序号是星期几,**周日 = 0 … 周六 = 6**(全应用的周都从周日开始:
+ * 热力图的行、打卡月历的列)。取 dayStart(day) 那一刻(本地 03:00)的星期,
+ * 日界口径与 dayIndex() 一致。
  */
-export function weekdayMon0(day: number): number {
-  return (new Date(dayStart(day)).getDay() + 6) % 7;
+export function weekdaySun0(day: number): number {
+  return new Date(dayStart(day)).getDay();
 }
 
 /**
  * 热力图第一格(左上角)的日序号。
  *
- * **网格必须按星期对齐**:行是 周一…周日,最后一列是本周,今天落在本周那一列
+ * **网格必须按星期对齐**:行是 周日…周六,最后一列是本周,今天落在本周那一列
  * 自己星期的那一行,今天之后的格子留空。早先的写法是「从今天往前数 weeks*7-1 天」
  * 再按 7 个一列摆,于是今天总落在最后一列的最后一行(周日)——
  * 周三学的显示成周日,整张图错位,上周日的 8 分钟跑到了别的格子里。
  */
 export function heatFirstDay(today: number, weeks: number): number {
-  return today - weekdayMon0(today) - (weeks - 1) * 7;
+  return today - weekdaySun0(today) - (weeks - 1) * 7;
 }
 
 /**
- * 热力图的格子:按列(周)主序,每列 7 格(周一…周日)。
+ * 热力图的格子:按列(周)主序,每列 7 格(周日…周六)。
  * 值是作答次数;**今天之后的格子是 -1**,界面画成透明,不算「没学」。
  */
 export function heatCells(today: number, weeks: number, repsOf: (day: number) => number): number[] {
@@ -978,7 +1072,7 @@ export interface DayBucket {
 /**
  * 把复习流水按**本地日序号**分桶。
  *
- * 为什么不在 SQL 里除法分桶:日界是凌晨 1 点且要按本地时区,
+ * 为什么不在 SQL 里除法分桶:日界是凌晨 3 点且要按本地时区,
  * SQL 里按 UTC 毫秒除以 86400000 会同时错在时区和那 1 小时上,
  * 于是「今天」在热力图和在首页是两个不同的日子。分桶必须走 dayIndex()。
  */

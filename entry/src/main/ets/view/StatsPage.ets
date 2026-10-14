@@ -29,13 +29,9 @@ import { L, LANG_ZH, fmt, masteryLabels } from '../i18n/Strings';
 const WEEKS: number = 18;
 const CELL: number = 13;
 const GAP: number = 3;
-/**
- * 星期标签由语言表提供(用 | 分隔的七个)。热力图按周一起头,
- * 所以把语言表里以周日开头的那份转成周一开头。
- */
+/** 星期标签由语言表提供(用 | 分隔的七个),周日开头 —— 全应用的周都从周日开始 */
 function weekdayLabels(lang: string): string[] {
-  const seq: string[] = L(lang).weekdays.split('|');
-  return [seq[1], seq[2], seq[3], seq[4], seq[5], seq[6], seq[0]];
+  return L(lang).weekdays.split('|');
 }
 /** 预测未来多少天 */
 const FORECAST_DAYS: number = 14;
