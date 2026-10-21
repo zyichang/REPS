@@ -19,6 +19,10 @@ import {
 } from '../store/AppStore';
 import { L, LANG_ZH, fmt, gradeLabels, phaseLabels } from '../i18n/Strings';
 import { formatInterval, newCardState, schedule } from '../srs/Srs';
+import { MAX_READ } from './Layout';
+
+/** 平板上四个评级按钮的总宽度上限 */
+const MAX_GRADES: number = 560;
 
 const DOMAIN: number = 0x0A01;
 const TAG: string = 'REPS-Study';
@@ -699,7 +703,7 @@ export struct StudyPage {
       .alignItems(HorizontalAlign.Start).layoutWeight(1)
       Text('›').fontSize(20).fontColor('#B0B7C3')
     }
-    .width('90%').padding(16).borderRadius(16).backgroundColor('#FFFFFF')
+    .width('90%').constraintSize({ maxWidth: MAX_READ }).padding(16).borderRadius(16).backgroundColor('#FFFFFF')
     .onClick(() => this.studyReviewedToday())
   }
 
@@ -773,7 +777,7 @@ export struct StudyPage {
           }
           .width('100%')
         }
-        .width('90%').padding(16).borderRadius(16).backgroundColor('#FFFFFF')
+        .width('90%').constraintSize({ maxWidth: MAX_READ }).padding(16).borderRadius(16).backgroundColor('#FFFFFF')
 
         // ---- 唯一的主动作 ----
         /*
@@ -788,7 +792,7 @@ export struct StudyPage {
          * 「学习完了」那一屏。按钮只在**这本书一张卡都没有**时才禁用。
          */
         Button(L(this.lang).startLearning)
-          .width('90%').height(50).fontSize(17).fontWeight(FontWeight.Medium)
+          .width('90%').constraintSize({ maxWidth: MAX_READ }).height(50).fontSize(17).fontWeight(FontWeight.Medium)
           .enabled(this.scopeCards > 0)
           .onClick(() => this.startSession())
 
@@ -796,7 +800,7 @@ export struct StudyPage {
 
         if (this.status.length > 0) {
           Text(this.status).fontSize(12).fontColor('#48484A')
-            .width('90%').textAlign(TextAlign.Center)
+            .width('90%').constraintSize({ maxWidth: MAX_READ }).textAlign(TextAlign.Center)
         }
       }
       .width('100%').padding({ top: 16, bottom: 24 })
@@ -849,7 +853,7 @@ export struct StudyPage {
       }
       .width('100%')
     }
-    .width('90%').margin({ top: 10, bottom: 4 })
+    .width('90%').constraintSize({ maxWidth: MAX_READ }).margin({ top: 10, bottom: 4 })
   }
 
   private accuracyText(): string {
@@ -883,7 +887,7 @@ export struct StudyPage {
 
       if (this.lastLine.length > 0) {
         Text(this.lastLine).fontSize(11).fontColor('#8A8A8E')
-          .width('90%').margin({ bottom: 4 })
+          .width('90%').constraintSize({ maxWidth: MAX_READ }).margin({ bottom: 4 })
       }
 
       Scroll() {
@@ -940,7 +944,7 @@ export struct StudyPage {
         // 右边多留一点:滚动条是浮在内容上的,不留空隙就会压住文字
         .width('100%').padding({ left: 4, right: 14, bottom: 12 })
       }
-      .layoutWeight(1).width('90%').align(Alignment.Top)
+      .layoutWeight(1).width('90%').constraintSize({ maxWidth: MAX_READ }).align(Alignment.Top)
       .scrollBarWidth(3)
       .scrollBarColor('#D0D3DA')
 
@@ -950,7 +954,7 @@ export struct StudyPage {
           // 「不知道」是一个真按钮。给一个诚实的出口,比逼人瞎猜好 ——
           // 猜对会把正确率和 FSRS 的稳定性一起抬高,那是假的
           Button(L(this.lang).dontKnow)
-            .width('90%').height(44).fontSize(15).margin({ bottom: 14 })
+            .width('90%').constraintSize({ maxWidth: MAX_READ }).height(44).fontSize(15).margin({ bottom: 14 })
             .backgroundColor('#F2F2F7').fontColor('#8A8A8E')
             .onClick(() => this.onDontKnow())
         } else if (this.judged === 1 && appStore().autoNext) {
@@ -959,15 +963,15 @@ export struct StudyPage {
             Text(L(this.lang).correctTitle)
               .fontSize(16).fontWeight(FontWeight.Medium).fontColor('#10B981')
           }
-          .width('90%').height(44).justifyContent(FlexAlign.Center).margin({ bottom: 14 })
+          .width('90%').constraintSize({ maxWidth: MAX_READ }).height(44).justifyContent(FlexAlign.Center).margin({ bottom: 14 })
         } else {
           Button(L(this.lang).nextOne)
-            .width('90%').height(48).fontSize(16).margin({ bottom: 14 })
+            .width('90%').constraintSize({ maxWidth: MAX_READ }).height(48).fontSize(16).margin({ bottom: 14 })
             .onClick(() => this.nextCard())
         }
       } else if (!this.revealed) {
         Button(L(this.lang).showAnswer)
-          .width('90%').height(48).fontSize(16).margin({ bottom: 14 })
+          .width('90%').constraintSize({ maxWidth: MAX_READ }).height(48).fontSize(16).margin({ bottom: 14 })
           .onClick(() => {
             this.revealed = true;
             if (this.cardType === (NoteType.Cloze as number)) {
@@ -981,7 +985,8 @@ export struct StudyPage {
           this.gradeButton(2)
           this.gradeButton(3)
         }
-        .width('90%').margin({ bottom: 14 })
+        // 平板上四个评级按钮不再拉成整屏宽的长条:收成一行居中的小按钮组
+        .width('90%').constraintSize({ maxWidth: MAX_GRADES }).margin({ bottom: 14 })
       }
     }
     .width('100%').height('100%')
@@ -1022,7 +1027,7 @@ export struct StudyPage {
       Text(fmt(L(this.lang).leftOver, this.dueCards, this.newCards))
         .fontSize(13).fontColor('#8A8A8E')
       Button(L(this.lang).studyMore)
-        .width('70%').height(44).fontSize(15).margin({ top: 10 })
+        .width('70%').constraintSize({ maxWidth: 420 }).height(44).fontSize(15).margin({ top: 10 })
         .onClick(() => this.studyMore())
       Text(fmt(L(this.lang).studyMoreHint, appStore().aheadCount))
         .fontSize(11).fontColor('#8A8A8E')
@@ -1031,7 +1036,7 @@ export struct StudyPage {
           .width('80%').textAlign(TextAlign.Center)
       }
       Button(L(this.lang).backHome)
-        .width('70%').height(44).fontSize(15)
+        .width('70%').constraintSize({ maxWidth: 420 }).height(44).fontSize(15)
         .backgroundColor('#E5E5EA').fontColor('#1C1C1E')
         .onClick(() => { this.refresh(); this.aheadNote = ''; this.stage = Stage.Landing; })
     }

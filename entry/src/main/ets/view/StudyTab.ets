@@ -10,17 +10,25 @@
  * Navigation 自己弹栈,不再走 Index 的返回计数器。
  *
  * ArkUI 铁律:列表行的 @Builder **只接常量下标**,内容从 @State 数组里取。
+ *
+ * 横屏平板(lg):Navigation 改成 Split —— 左边是「今日」+ 牌组列表,右边是选中的卡组页;
+ * 一进来就自动选中第一组,右边不会空着。开始作答(沉浸)时把左栏也藏掉,作答区占满全屏。
+ * 竖屏平板(md):仍是单栏,内容收进最宽 MAX_COL 的居中列。
  */
 
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { ImportResult, importFromPicker } from '../data/Importer';
 import { DeckCounts, dayIndex } from '../data/Schema';
 import { L, LANG_ZH, fmt } from '../i18n/Strings';
-import { SK_LANG, SK_TICK, appStore } from '../store/AppStore';
+import { SK_IMMERSIVE, SK_LANG, SK_TICK, appStore } from '../store/AppStore';
+import { BP_SM, MAX_COL, SIDE_W, SK_BP, isSplit } from './Layout';
+import { ImportIcon } from './ImportIcon';
+import { runImport } from './ImportAction';
 import { COLOR_DUE, COLOR_LEARN, COLOR_NEW, COLOR_ZERO } from './DeckColors';
 import { StudyPage } from './StudyPage';
 
+/** 页面大标题。品牌名,各语言都写 REPS(中文应用名「刻意重复」只出现在桌面和关于里) */
+const BRAND: string = 'REPS';
 const DOMAIN: number = 0x0A01;
 const TAG: string = 'REPS-Decks';
 
@@ -51,6 +59,13 @@ export struct StudyTab {
 
   @StorageLink(SK_TICK) @Watch('onTick') tick: number = 0;
   @StorageLink(SK_LANG) lang: string = LANG_ZH;
+  @StorageLink(SK_BP) @Watch('onBreakpoint') bp: string = BP_SM;
+  /** 作答中:分栏时左栏要藏起来 */
+  @StorageLink(SK_IMMERSIVE) immersive: boolean = false;
+  /** 分栏时右边打开的是哪一组(列表上高亮这一行);0 = 没有 */
+  @State private openId: number = 0;
+  /** 第一次拿到牌组之后才自动打开第一组(启动时数据库可能还没就绪) */
+  private autoOpened: boolean = false;
 
   @State private decks: DeckCounts[] = [];
   @State private status: string = '';
@@ -68,11 +83,46 @@ export struct StudyTab {
   @State private confirmKind: number = 0;
 
   aboutToAppear(): void {
+    // 右栏的卡组页被返回关掉时,列表上的高亮跟着去掉
+    this.stack.setInterception({
+      didShow: () => {
+        if (this.stack.size() === 0) {
+          this.openId = 0;
+        }
+      },
+    });
     this.reload();
   }
 
   onTick(): void {
     this.reload();
+  }
+
+  /** 旋转到横屏:右栏不要空着;转回竖屏:页面栈原样保留,继续当单栏用 */
+  onBreakpoint(): void {
+    this.ensureDetail(true);
+  }
+
+  /**
+   * 分栏时整理右栏:打开的那组被删掉了就关掉它;`autoOpen` 时若右栏是空的就打开第一组。
+   *
+   * 只在**刚进入分栏**(启动、转到横屏)时 autoOpen。用户在右栏按返回把卡组页关掉之后,
+   * 右栏就该空着、列表上不再高亮 —— 再按一次返回才退出应用,和系统的双栏应用一致。
+   * 单栏时什么都不做:手机上进入卡组必须是用户自己点的。
+   */
+  private ensureDetail(autoOpen: boolean): void {
+    if (!isSplit(this.bp)) {
+      return;
+    }
+    if (this.openId !== 0 && this.decks.every((d: DeckCounts) => d.id !== this.openId)) {
+      this.stack.clear(false);
+    }
+    if (this.stack.size() === 0) {
+      this.openId = 0;
+    }
+    if (autoOpen && this.openId === 0 && this.decks.length > 0) {
+      this.openDeck(0);
+    }
   }
 
   private reload(): void {
@@ -93,6 +143,8 @@ export struct StudyTab {
       this.totalNew = n;
       this.totalDue = d;
       this.checkedIn = db.isCheckedIn(dayIndex(now));
+      this.ensureDetail(!this.autoOpened);
+      this.autoOpened = this.autoOpened || this.decks.length > 0;
     } catch (e) {
       this.status = fmt(L(this.lang).readFailed, `${e}`);
       hilog.error(DOMAIN, TAG, '读取牌组失败 %{public}s', `${e}`);
@@ -100,7 +152,18 @@ export struct StudyTab {
   }
 
   private openDeck(i: number): void {
-    this.stack.pushPath({ name: ROUTE_DECK, param: this.decks[i].id });
+    const id: number = this.decks[i].id;
+    if (isSplit(this.bp)) {
+      // 分栏:右栏只放一组,换一组就整栈替换(不在右栏里越摞越深)
+      if (this.openId === id && this.stack.size() > 0) {
+        return;
+      }
+      this.stack.clear(false);
+      this.stack.pushPath({ name: ROUTE_DECK, param: id }, false);
+    } else {
+      this.stack.pushPath({ name: ROUTE_DECK, param: id });
+    }
+    this.openId = id;
   }
 
   // ---------------------------------------------------------------- 打卡
@@ -176,7 +239,7 @@ export struct StudyTab {
       .backgroundColor(this.checkedIn ? '#10B981' : '#EDEEF2')
       .onClick(() => this.onCheckIn())
     }
-    .width('90%').padding(16).margin({ top: 16, bottom: 12 })
+    .width('90%').constraintSize({ maxWidth: MAX_COL }).padding(16).margin({ bottom: 12 })
     .borderRadius(16).backgroundColor(Color.White)
   }
 
@@ -224,6 +287,7 @@ export struct StudyTab {
     appStore().bump();
   }
 
+  /** 标题栏的导入图标(没有牌组时还有一个居中的大按钮)。和浏览页共用 runImport */
   private async onImport(): Promise<void> {
     if (this.busy) {
       return;
@@ -232,18 +296,31 @@ export struct StudyTab {
     this.status = L(this.lang).importing;
     try {
       const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      const r: ImportResult = await importFromPicker(ctx, appStore().getDb());
-      this.status = r.ok
-        ? fmt(L(this.lang).importedTo, r.cardsAdded, r.deck)
-        : (r.error === L(this.lang).cancel ? '' : fmt(L(this.lang).importFailed, r.error));
-      if (r.ok) {
-        appStore().bump();
-      }
-    } catch (e) {
-      this.status = fmt(L(this.lang).importFailed, `${e}`);
+      // 取消返回空串:取消不是失败,什么都不用说
+      this.status = await runImport(ctx, this.lang);
     } finally {
       this.busy = false;
     }
+  }
+
+  /**
+   * 页面标题栏:左边 REPS,右边导入图标。和浏览页「浏览 + 导入 + 新建」同一种标题栏,
+   * 取代原来页面底部那条整宽的「导入牌组」按钮。
+   */
+  @Builder
+  header() {
+    Row() {
+      Text(BRAND)
+        .fontSize(26).fontWeight(FontWeight.Bold).layoutWeight(1)
+      Stack() {
+        ImportIcon({ color: this.busy ? '#B0B7C3' : '#3B82F6', side: 26 })
+      }
+      .width(44).height(44)
+      .accessibilityText(L(this.lang).importDeck)
+      .accessibilityLevel('yes')
+      .onClick(() => { this.onImport(); })
+    }
+    .width('90%').constraintSize({ maxWidth: MAX_COL }).margin({ top: 16, bottom: 10 })
   }
 
   /** 确认框。文案沿用原词卡表里的那套,作用对象是被点的那一组 */
@@ -268,7 +345,7 @@ export struct StudyTab {
       }
       .width('100%')
     }
-    .width('90%').padding(16).borderRadius(14).backgroundColor(Color.White)
+    .width('90%').constraintSize({ maxWidth: 480 }).padding(16).borderRadius(14).backgroundColor(Color.White)
     .shadow({ radius: 16, color: '#33000000' })
   }
 
@@ -328,20 +405,27 @@ export struct StudyTab {
         .bindMenu(this.actionsFor(i))
     }
     .width('100%').padding({ left: 16, right: 4, top: 14, bottom: 14 })
-    .backgroundColor(Color.White).borderRadius(12)
+    // 分栏时右边正打开的那组用浅蓝底标出来
+    .backgroundColor(isSplit(this.bp) && this.deckAt(i).id === this.openId ? '#EAF1FE' : Color.White)
+    .borderRadius(12)
     .onClick(() => this.openDeck(i))
   }
 
   @Builder
   deckList() {
     Column() {
-      // 不再有「牌组」大标题:「今日」卡片就是这一页的顶部
+      this.header()
       this.todayCard()
 
       if (this.decks.length === 0) {
         Text(L(this.lang).deckListEmpty)
           .fontSize(14).fontColor('#8A8A8E')
-          .width('90%').textAlign(TextAlign.Center).margin({ top: 40 })
+          .width('90%').constraintSize({ maxWidth: MAX_COL }).textAlign(TextAlign.Center).margin({ top: 40 })
+        // 还没有任何牌组:标题栏上的小图标容易被忽略,这里给一个明显的入口。有牌组之后就不再显示
+        Button(L(this.lang).importDeck)
+          .height(46).fontSize(16).padding({ left: 32, right: 32 }).margin({ top: 16 })
+          .enabled(!this.busy)
+          .onClick(() => { this.onImport(); })
       } else {
         // 列头:与每行的三个计数同宽,数字才能对齐
         Row() {
@@ -350,7 +434,7 @@ export struct StudyTab {
           this.headerCell(1)
           this.headerCell(2)
         }
-        .width('90%').padding({ right: 44 }).margin({ bottom: 6 })
+        .width('90%').constraintSize({ maxWidth: MAX_COL }).padding({ right: 44 }).margin({ bottom: 6 })
 
         List({ space: 8 }) {
           // 牌组通常只有个位数到几十个,ForEach 足够;key 带上计数,数字变了行就重建
@@ -361,20 +445,15 @@ export struct StudyTab {
           }, (d: DeckCounts, idx: number) =>
             `${idx}:${d.id}:${d.name}:${d.cards}:${d.newCount}:${d.learnCount}:${d.dueCount}`)
         }
-        .layoutWeight(1).width('90%')
+        .layoutWeight(1).width('90%').constraintSize({ maxWidth: MAX_COL })
         .scrollBar(BarState.Auto)
       }
 
       if (this.status.length > 0) {
         Text(this.status).fontSize(12).fontColor('#48484A')
-          .width('90%').textAlign(TextAlign.Center).margin({ top: 8 })
+          .width('90%').constraintSize({ maxWidth: MAX_COL }).textAlign(TextAlign.Center)
+          .margin({ top: 8, bottom: 12 })
       }
-
-      // Anki 的牌组列表底部就是「导入」这类全局动作
-      Button(L(this.lang).importDeck)
-        .width('90%').height(46).fontSize(16).margin({ top: 8, bottom: 12 })
-        .enabled(!this.busy)
-        .onClick(() => { this.onImport(); })
     }
     .width('100%').height('100%').backgroundColor('#F2F2F7')
   }
@@ -396,7 +475,10 @@ export struct StudyTab {
     .navDestination(studyRoutes)
     .hideTitleBar(true)
     .hideToolBar(true)
-    .mode(NavigationMode.Stack)
+    .mode(isSplit(this.bp) ? NavigationMode.Split : NavigationMode.Stack)
+    .navBarWidth(SIDE_W)
+    // 作答时左栏也收起来,作答区占满全屏
+    .hideNavBar(isSplit(this.bp) && this.immersive)
     .width('100%').height('100%')
   }
 }

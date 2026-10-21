@@ -41,6 +41,8 @@ export interface ImportResult {
   cardsAdded: number;
   /** 文件里原本没有 front matter,卡组名是用文件名兜底的 */
   usedFallbackDeck: boolean;
+  /** 用户在文件选择器里点了取消:不是错误,界面上什么都不用说 */
+  cancelled: boolean;
   /** 失败原因,ok 为 true 时是空串 */
   error: string;
 }
@@ -136,7 +138,9 @@ export async function importFromPicker(context: common.UIAbilityContext,
     return fail('', m(`打开文件选择器失败: ${e}`, `Could not open the file picker: ${e}`));
   }
   if (uri.length === 0) {
-    return fail('', m('已取消', 'Cancelled'));
+    const r: ImportResult = fail('', m('已取消', 'Cancelled'));
+    r.cancelled = true;
+    return r;
   }
 
   const name: string = deckNameFromUri(uri);
@@ -165,7 +169,7 @@ export async function importFromPicker(context: common.UIAbilityContext,
     const added: number = storeDeck(db, parsed, name, Date.now());
     hilog.info(DOMAIN, TAG, '导入 %{public}s: %{public}d 张卡', parsed.deck, added);
     return {
-      ok: true, name: name, deck: parsed.deck, cardsAdded: added,
+      ok: true, cancelled: false, name: name, deck: parsed.deck, cardsAdded: added,
       usedFallbackDeck: !parsed.hadFrontMatter, error: '',
     };
   } catch (e) {
@@ -174,5 +178,5 @@ export async function importFromPicker(context: common.UIAbilityContext,
 }
 
 function fail(name: string, error: string): ImportResult {
-  return { ok: false, name: name, deck: '', cardsAdded: 0, usedFallbackDeck: false, error: error };
+  return { ok: false, cancelled: false, name: name, deck: '', cardsAdded: 0, usedFallbackDeck: false, error: error };
 }

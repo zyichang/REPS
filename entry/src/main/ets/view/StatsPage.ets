@@ -27,8 +27,10 @@ import { MASTERY_COLOR } from '../model/Models';
 import { masteryOf } from '../srs/Srs';
 import { SK_LANG, SK_TICK, appStore } from '../store/AppStore';
 import { L, LANG_ZH, fmt, masteryLabels } from '../i18n/Strings';
+import { BP_SM, MAX_COL, SK_BP, isSplit } from './Layout';
 
 /** 热力图显示最近多少周 */
+/** 热力图至少显示多少周(手机上就是这么多,超出部分横向滑动) */
 const WEEKS: number = 18;
 const CELL: number = 13;
 const GAP: number = 3;
@@ -45,6 +47,8 @@ const TIME_DAYS: number = 7;
 export struct StatsPage {
   /** 界面文字跟随语言 */
   @StorageLink(SK_LANG) lang: string = LANG_ZH;
+  /** 断点:横屏平板两栏 */
+  @StorageLink(SK_BP) bp: string = BP_SM;
   /**
    * **@Watch 是必须的。** ArkUI 里 @StorageLink 的变化只触发重绘,
    * 不会自动调用 on<字段名>Change() —— 少了这个装饰器,界面会用旧值重绘,
@@ -64,7 +68,14 @@ export struct StatsPage {
   @State private calGen: number = 0;
   @State private today: number = 0;
   @State private streak: number = 0;
-  /** 热力图:每格的作答次数,按 day 升序,长度 = WEEKS*7 */
+  /**
+   * 热力图实际显示的周数。手机固定 WEEKS;平板按热力图区域的实际宽度能放下多少列就显示多少列
+   * (见 onHeatWidth),横屏半栏和竖屏整栏各自铺满,不再右边空一大块。
+   */
+  @State private weeks: number = WEEKS;
+  /** 按天的作答次数,reload 时取一次;周数变了直接用它重排格子,不必重查数据库 */
+  private repsByDay: Map<number, number> = new Map<number, number>();
+  /** 热力图:每格的作答次数,按 day 升序,长度 = weeks*7 */
   @State private heat: number[] = [];
   /** 未来 FORECAST_DAYS 天每天的到期量 */
   @State private forecast: number[] = [];
@@ -126,7 +137,8 @@ export struct StatsPage {
       this.retention = db.retentionAll();
 
       // 按星期对齐:最后一列是本周,今天之后为 -1(见 Schema.heatCells)
-      this.heat = heatCells(today, WEEKS, (d: number) => repsByDay.get(d) ?? 0);
+      this.repsByDay = repsByDay;
+      this.heat = heatCells(today, this.weeks, (d: number) => repsByDay.get(d) ?? 0);
 
       // 连续天数也按打卡算:漏一天不断,连漏两天才断(Schema.checkinStreak)
       this.streak = checkinStreak(checkinDays, today);
@@ -223,7 +235,9 @@ export struct StatsPage {
         .fontColor(this.checkins.has(this.calCells[idx] ?? -1) ? Color.White
           : calendarDate(this.calCells[idx] ?? 0)[1] === this.calMonth ? '#1C1C1E' : '#C7C7CC')
     }
-    .layoutWeight(1).aspectRatio(1).margin(2)
+    // 手机上正方形(约 45vp)。平板上格子更宽,还按 1:1 就会长成 100vp 高的大格子:
+    // 改成扁一点的宽高比,高度都在 45vp 上下,宽度仍跟着星期那一行对齐
+    .layoutWeight(1).aspectRatio(this.bp === BP_SM ? 1 : isSplit(this.bp) ? 1.5 : 2).margin(2)
     .borderRadius(8)
     .backgroundColor(this.checkins.has(this.calCells[idx] ?? -1) ? '#10B981' : 'rgba(0,0,0,0)')
     .borderWidth(this.calCells[idx] === this.today ? 1.5 : 0)
@@ -348,22 +362,25 @@ export struct StatsPage {
   @Builder
   sectionTitle(which: number) {
     // 两段的分界:上「综合统计」按整个应用算(删了的牌组也在内,ADR-0005),
-    // 下「进度统计」按所选牌组。标题用同一级字号,一眼看出是两块
-    Column({ space: 6 }) {
+    // 下「进度统计」按所选牌组。标题用同一级字号,一眼看出是两块。
+    // 卡组选择器和「进度统计」放在同一行的右边 —— 它本来就属于这个标题,
+    // 单独占一行会把横屏平板的统计页撑出滚动条
+    Row() {
       Text(which === 0 ? L(this.lang).sectionAll : L(this.lang).sectionBook)
-        .fontSize(17).fontWeight(FontWeight.Bold).fontColor('#1C1C1E').width('100%')
+        .fontSize(17).fontWeight(FontWeight.Bold).fontColor('#1C1C1E').layoutWeight(1)
       if (which === 1) {
         Select(this.filterOptions())
           .selected(this.filterIndex())
           .value(this.filterLabel())
           .font({ size: 15, weight: FontWeight.Medium })
+          .constraintSize({ maxWidth: '60%' })
           .onSelect((index: number) => {
             this.filterDeck = index === 0 ? 0 : this.decks[index - 1].id;
             this.reload();
           })
       }
     }
-    .width('100%').alignItems(HorizontalAlign.Start).margin({ top: 4 })
+    .width('100%').margin({ top: 4 })
   }
 
   /** 学习时长的一根柱子。只接常量下标 */
@@ -377,6 +394,113 @@ export struct StatsPage {
     .layoutWeight(1).justifyContent(FlexAlign.End)
   }
 
+  /** 热力图(作答量)。无参 @Builder:内容全在内部从状态取 */
+  @Builder
+  heatCard() {
+    // ---- 热力图 ----
+    Column({ space: 8 }) {
+      Text(fmt(L(this.lang).recentWeeks, this.weeks)).fontSize(14).fontWeight(FontWeight.Medium).width('100%')
+      Row({ space: GAP }) {
+        Column({ space: GAP }) {
+          ForEach(weekdayLabels(this.lang), (d: string) => {
+            Text(d).fontSize(9).fontColor('#B0B7C3')
+              .width(12).height(CELL).textAlign(TextAlign.Center)
+          })
+        }
+        Scroll() {
+          Row({ space: GAP }) {
+            ForEach(this.weekIndexes(), (w: number) => {
+              this.heatColumn(w)
+            })
+          }
+        }
+        .scrollable(ScrollDirection.Horizontal)
+        // 格子不够撑满宽度时靠左,不要漂在卡片中间
+        .align(Alignment.Start)
+        .layoutWeight(1)
+        // 宽度由 layoutWeight 决定,与格子多少无关,所以按它算周数不会来回抖
+        .onAreaChange((_old: Area, now: Area) => this.onHeatWidth(Number(now.width)))
+      }
+      .width('100%').alignItems(VerticalAlign.Top)
+    }
+    .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
+  }
+
+  /** 最近 7 天学习时长 */
+  @Builder
+  timeCard() {
+    // ---- 最近 7 天学习时长 ----
+    // 用的是 review_log.cost_ms,也就是做计时判档时记下的真实答题耗时,
+    // 不是「打开应用多久」——后者会把发呆也算成学习。
+    Column({ space: 8 }) {
+      Text(L(this.lang).studyTime).fontSize(14)
+        .fontWeight(FontWeight.Medium).width('100%')
+      if (this.hasAnyTime()) {
+        Row({ space: 4 }) {
+          this.timeBar(0)
+          this.timeBar(1)
+          this.timeBar(2)
+          this.timeBar(3)
+          this.timeBar(4)
+          this.timeBar(5)
+          this.timeBar(6)
+        }
+        .width('100%').height(84).alignItems(VerticalAlign.Bottom)
+        Row({ space: 4 }) {
+          ForEach(this.dayLabels(), (d: string) => {
+            Text(d).fontSize(9).fontColor('#B0B7C3')
+              .layoutWeight(1).textAlign(TextAlign.Center)
+          })
+        }
+        .width('100%')
+      } else {
+        Text(L(this.lang).noTimeYet).fontSize(12).fontColor('#B0B7C3')
+          .width('100%').padding({ top: 8, bottom: 8 })
+      }
+    }
+    .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
+  }
+
+  /** 复习量预测 */
+  @Builder
+  forecastCard() {
+    // ---- 复习量预测 ----
+    Column({ space: 8 }) {
+      Text(fmt(L(this.lang).forecastDays, FORECAST_DAYS)).fontSize(14)
+        .fontWeight(FontWeight.Medium).width('100%')
+      Row({ space: 4 }) {
+        ForEach(this.forecast, (n: number) => {
+          Column() {
+            Text(n > 0 ? `${n}` : '').fontSize(9).fontColor('#8A8A8E')
+            Rect({ width: 14, height: this.barHeight(n) })
+              .radius(2).fill('#3B82F6').margin({ top: 2 })
+          }
+          .layoutWeight(1).justifyContent(FlexAlign.End)
+        })
+      }
+      .width('100%').height(90).alignItems(VerticalAlign.Bottom)
+    }
+    .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
+  }
+
+  /** 掌握度分布 */
+  @Builder
+  masteryBlock() {
+    // ---- 掌握度分布 ----
+    Column({ space: 8 }) {
+      Text(L(this.lang).masterySpread).fontSize(14).fontWeight(FontWeight.Medium).width('100%')
+      Row({ space: 6 }) {
+        this.masteryCard(0)
+        this.masteryCard(1)
+        this.masteryCard(2)
+        this.masteryCard(3)
+        this.masteryCard(4)
+      }
+      .width('100%')
+    }
+    .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
+  }
+
   build() {
     Scroll() {
       Column({ space: 14 }) {
@@ -388,7 +512,8 @@ export struct StatsPage {
         }
 
         // ================= 全部卡组:与选哪本书无关 =================
-        this.sectionTitle(0)
+        // 不再画「综合统计」小标题:四张统计卡片紧挨着页面大标题,含义已经很清楚,
+        // 省下的这一行让横屏平板的统计页一屏放得下
 
         Row({ space: 8 }) {
           this.statCard(0)
@@ -398,100 +523,41 @@ export struct StatsPage {
         }
         .width('100%')
 
-        // ---- 热力图 ----
-        Column({ space: 8 }) {
-          Text(fmt(L(this.lang).recentWeeks, WEEKS)).fontSize(14).fontWeight(FontWeight.Medium).width('100%')
-          Row({ space: GAP }) {
-            Column({ space: GAP }) {
-              ForEach(weekdayLabels(this.lang), (d: string) => {
-                Text(d).fontSize(9).fontColor('#B0B7C3')
-                  .width(12).height(CELL).textAlign(TextAlign.Center)
-              })
+        // 横屏平板两栏并排:左栏 热力图 + 学习时长,右栏 打卡月历 —— 两栏高度相近,
+        // 热力图下面不会空出一大块。手机 / 竖屏平板单栏,顺序与原来一致
+        if (isSplit(this.bp)) {
+          Row({ space: 14 }) {
+            Column({ space: 14 }) {
+              this.heatCard()
+              this.timeCard()
             }
-            Scroll() {
-              Row({ space: GAP }) {
-                ForEach(this.weekIndexes(), (w: number) => {
-                  this.heatColumn(w)
-                })
-              }
-            }
-            .scrollable(ScrollDirection.Horizontal)
             .layoutWeight(1)
+            Column() { this.checkinCalendar() }.layoutWeight(1)
           }
           .width('100%').alignItems(VerticalAlign.Top)
+        } else {
+          this.heatCard()
+          // ---- 打卡统计(月历)----
+          this.checkinCalendar()
+          this.timeCard()
         }
-        .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
-
-        // ---- 打卡统计(月历)----
-        this.checkinCalendar()
-
-        // ---- 最近 7 天学习时长 ----
-        // 用的是 review_log.cost_ms,也就是做计时判档时记下的真实答题耗时,
-        // 不是「打开应用多久」——后者会把发呆也算成学习。
-        Column({ space: 8 }) {
-          Text(L(this.lang).studyTime).fontSize(14)
-            .fontWeight(FontWeight.Medium).width('100%')
-          if (this.hasAnyTime()) {
-            Row({ space: 4 }) {
-              this.timeBar(0)
-              this.timeBar(1)
-              this.timeBar(2)
-              this.timeBar(3)
-              this.timeBar(4)
-              this.timeBar(5)
-              this.timeBar(6)
-            }
-            .width('100%').height(84).alignItems(VerticalAlign.Bottom)
-            Row({ space: 4 }) {
-              ForEach(this.dayLabels(), (d: string) => {
-                Text(d).fontSize(9).fontColor('#B0B7C3')
-                  .layoutWeight(1).textAlign(TextAlign.Center)
-              })
-            }
-            .width('100%')
-          } else {
-            Text(L(this.lang).noTimeYet).fontSize(12).fontColor('#B0B7C3')
-              .width('100%').padding({ top: 8, bottom: 8 })
-          }
-        }
-        .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
 
         // ================= 当前课本:随切换课本而变 =================
         this.sectionTitle(1)
 
-        // ---- 复习量预测 ----
-        Column({ space: 8 }) {
-          Text(fmt(L(this.lang).forecastDays, FORECAST_DAYS)).fontSize(14)
-            .fontWeight(FontWeight.Medium).width('100%')
-          Row({ space: 4 }) {
-            ForEach(this.forecast, (n: number) => {
-              Column() {
-                Text(n > 0 ? `${n}` : '').fontSize(9).fontColor('#8A8A8E')
-                Rect({ width: 14, height: this.barHeight(n) })
-                  .radius(2).fill('#3B82F6').margin({ top: 2 })
-              }
-              .layoutWeight(1).justifyContent(FlexAlign.End)
-            })
+        if (isSplit(this.bp)) {
+          Row({ space: 14 }) {
+            Column() { this.forecastCard() }.layoutWeight(1)
+            Column() { this.masteryBlock() }.layoutWeight(1)
           }
-          .width('100%').height(90).alignItems(VerticalAlign.Bottom)
+          .width('100%').alignItems(VerticalAlign.Top)
+        } else {
+          this.forecastCard()
+          this.masteryBlock()
         }
-        .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
-
-        // ---- 掌握度分布 ----
-        Column({ space: 8 }) {
-          Text(L(this.lang).masterySpread).fontSize(14).fontWeight(FontWeight.Medium).width('100%')
-          Row({ space: 6 }) {
-            this.masteryCard(0)
-            this.masteryCard(1)
-            this.masteryCard(2)
-            this.masteryCard(3)
-            this.masteryCard(4)
-          }
-          .width('100%')
-        }
-        .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
       }
-      .width('90%').padding({ bottom: 20 })
+      // 竖屏平板收进居中列;横屏平板两栏并排,给到 1100vp
+      .width('90%').constraintSize({ maxWidth: isSplit(this.bp) ? 1100 : MAX_COL }).padding({ bottom: 20 })
     }
     .width('100%').height('100%').backgroundColor('#FFFFFF').align(Alignment.Top)
   }
@@ -541,9 +607,24 @@ export struct StatsPage {
     return out;
   }
 
+  /**
+   * 热力图区域宽度变了(首次布局、旋转、分屏):平板上按宽度放满整列,手机固定 WEEKS。
+   * 一列占 CELL + GAP,最后一列后面不需要 GAP,所以分子加一个 GAP。
+   */
+  private onHeatWidth(widthVp: number): void {
+    const fit: number = Math.floor((widthVp + GAP) / (CELL + GAP));
+    const next: number = this.bp === BP_SM ? WEEKS : Math.max(WEEKS, fit);
+    if (next === this.weeks || !(next > 0)) {
+      return;
+    }
+    this.weeks = next;
+    const reps: Map<number, number> = this.repsByDay;
+    this.heat = heatCells(dayIndex(Date.now()), next, (d: number) => reps.get(d) ?? 0);
+  }
+
   private weekIndexes(): number[] {
     const out: number[] = [];
-    for (let i = 0; i < WEEKS; i++) {
+    for (let i = 0; i < this.weeks; i++) {
       out.push(i);
     }
     return out;

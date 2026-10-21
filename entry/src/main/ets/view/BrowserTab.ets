@@ -13,6 +13,7 @@
  * 预览 / 编辑页的正文由 MarkupText / MathText(@Prop + @Watch)渲染。
  */
 
+import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { ParsedCard, QuizifyError, parseOneCard, renderCloze } from '../data/Quizify';
 import { BrowseRow, DeckRow } from '../data/Schema';
@@ -21,6 +22,9 @@ import { SK_LANG, SK_TICK, appStore } from '../store/AppStore';
 import { ArrayDataSource } from './ArrayDataSource';
 import { MarkupText } from './MarkupText';
 import { MathText, hasMath } from './MathText';
+import { BP_SM, MAX_COL, SIDE_W, SK_BP, isSplit } from './Layout';
+import { ImportIcon } from './ImportIcon';
+import { runImport } from './ImportAction';
 
 const DOMAIN: number = 0x0A01;
 const TAG: string = 'REPS-Browse';
@@ -102,6 +106,13 @@ export struct BrowserTab {
 
   @StorageLink(SK_TICK) @Watch('onTick') tick: number = 0;
   @StorageLink(SK_LANG) lang: string = LANG_ZH;
+  /**
+   * 横屏平板(lg):Navigation 改成 Split,左边列表、右边预览 / 编辑,点一行只换右栏。
+   * 一进入分栏就预览第一张,右栏不空着。竖屏平板仍是单栏,内容收进居中列。
+   */
+  @StorageLink(SK_BP) @Watch('onBreakpoint') bp: string = BP_SM;
+  /** 分栏时右栏在预览哪张卡(列表上高亮);0 = 没有 */
+  @State private openCard: number = 0;
 
   @State private rows: BrowseRow[] = [];
   @State private decks: DeckRow[] = [];
@@ -118,11 +129,49 @@ export struct BrowserTab {
   private gen: number = 0;
 
   aboutToAppear(): void {
+    // 右栏被返回关空了:去掉列表上的高亮
+    this.stack.setInterception({
+      didShow: () => {
+        if (this.stack.size() === 0) {
+          this.openCard = 0;
+        }
+      },
+    });
     this.reload();
+    this.autoPreview();
   }
 
   onTick(): void {
     this.reload();
+  }
+
+  onBreakpoint(): void {
+    this.autoPreview();
+  }
+
+  /** 刚进入分栏、右栏还空着:预览第一张。单栏时什么都不做 */
+  private autoPreview(): void {
+    if (isSplit(this.bp) && this.stack.size() === 0 && this.rows.length > 0) {
+      this.openPreview(0);
+    }
+  }
+
+  /**
+   * 打开第 i 行的预览。分栏时右栏整栈替换成这一张(编辑页也一起关掉),
+   * 单栏时照旧压栈。
+   */
+  private openPreview(i: number): void {
+    const r: BrowseRow = this.rowAt(i);
+    if (r.cardId === 0) {
+      return;
+    }
+    if (isSplit(this.bp)) {
+      this.stack.clear(false);
+      this.stack.pushPath({ name: ROUTE_PREVIEW, param: r }, false);
+    } else {
+      this.stack.pushPath({ name: ROUTE_PREVIEW, param: r });
+    }
+    this.openCard = r.cardId;
   }
 
   private reload(): void {
@@ -195,6 +244,33 @@ export struct BrowserTab {
     return i === 0 ? L(this.lang).allDecks : this.decks[i - 1].name;
   }
 
+  private importing: boolean = false;
+
+  /**
+   * 标题栏的导入图标:和学习页的导入完全一样(runImport)。导入成功会 bump(),列表自己重查;
+   * 结果用 toast 说 —— 列表顶上那行状态文字在重查时会被清掉。
+   */
+  private async onImport(): Promise<void> {
+    if (this.importing) {
+      return;
+    }
+    this.importing = true;
+    try {
+      const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const msg: string = await runImport(ctx, this.lang);
+      if (msg.length > 0) {
+        try {
+          this.getUIContext().getPromptAction().showToast({ message: msg, duration: 2500 });
+        } catch (e) {
+          // toast 失败不影响导入本身;列表已经通过 bump() 刷新
+          hilog.warn(DOMAIN, TAG, 'toast 失败 %{public}s', `${e}`);
+        }
+      }
+    } finally {
+      this.importing = false;
+    }
+  }
+
   private openNew(): void {
     if (this.decks.length === 0) {
       this.status = L(this.lang).needDeckFirst;
@@ -202,7 +278,11 @@ export struct BrowserTab {
     }
     // 默认放进正在看的那一组;看的是全部就放第一组,编辑页里还能改
     const deck: number = this.filterDeck !== 0 ? this.filterDeck : this.decks[0].id;
-    this.stack.pushPath({ name: ROUTE_EDIT, param: new EditArgs(0, deck, '', '') });
+    if (isSplit(this.bp)) {
+      this.stack.clear(false);
+      this.openCard = 0;
+    }
+    this.stack.pushPath({ name: ROUTE_EDIT, param: new EditArgs(0, deck, '', '') }, !isSplit(this.bp));
   }
 
   /**
@@ -244,8 +324,10 @@ export struct BrowserTab {
       }
     }
     .width('100%').padding(12)
-    .backgroundColor(Color.White).borderRadius(10)
-    .onClick(() => this.stack.pushPath({ name: ROUTE_PREVIEW, param: this.rowAt(i) }))
+    // 分栏时右栏正在预览的那张用浅蓝底标出来
+    .backgroundColor(isSplit(this.bp) && this.rowAt(i).cardId === this.openCard ? '#EAF1FE' : Color.White)
+    .borderRadius(10)
+    .onClick(() => this.openPreview(i))
   }
 
   @Builder
@@ -254,13 +336,21 @@ export struct BrowserTab {
       Row() {
         Text(L(this.lang).browseTitle)
           .fontSize(26).fontWeight(FontWeight.Bold).layoutWeight(1)
+        // 导入在左、新建在右:「+」留在原来的最右边
+        Stack() {
+          ImportIcon({ color: '#3B82F6', side: 26 })
+        }
+        .width(44).height(44)
+        .accessibilityText(L(this.lang).importDeck)
+        .accessibilityLevel('yes')
+        .onClick(() => { this.onImport(); })
         Text('+')
           .fontSize(30).fontColor('#3B82F6')
           .width(44).height(44).textAlign(TextAlign.Center)
           .accessibilityText(L(this.lang).newCardTitle)
           .onClick(() => this.openNew())
       }
-      .width('90%').margin({ top: 16, bottom: 10 })
+      .width('90%').constraintSize({ maxWidth: MAX_COL }).margin({ top: 16, bottom: 10 })
 
       Row({ space: 8 }) {
         // 卡组过滤:Anki 浏览器左侧栏的手机版
@@ -280,10 +370,10 @@ export struct BrowserTab {
             this.reload();
           })
       }
-      .width('90%').margin({ bottom: 8 })
+      .width('90%').constraintSize({ maxWidth: MAX_COL }).margin({ bottom: 8 })
 
       Text(this.status.length > 0 ? this.status : fmt(L(this.lang).matchCount, this.total))
-        .fontSize(11).fontColor('#8A8A8E').width('90%').margin({ bottom: 6 })
+        .fontSize(11).fontColor('#8A8A8E').width('90%').constraintSize({ maxWidth: MAX_COL }).margin({ bottom: 6 })
 
       if (this.rows.length === 0) {
         Text(this.decks.length === 0 ? L(this.lang).needDeckFirst : L(this.lang).noMatch)
@@ -299,7 +389,7 @@ export struct BrowserTab {
           }, (r: BrowseRow, idx: number) => `${this.gen}:${idx}:${r.cardId}`)
         }
         .cachedCount(6)
-        .layoutWeight(1).width('90%')
+        .layoutWeight(1).width('90%').constraintSize({ maxWidth: MAX_COL })
         .scrollBar(BarState.Auto)
         // 滑到最后一行就加载下一批(每批张数在「高级设置 → 浏览」里)
         .onReachEnd(() => this.loadMore())
@@ -315,7 +405,8 @@ export struct BrowserTab {
     .navDestination(browseRoutes)
     .hideTitleBar(true)
     .hideToolBar(true)
-    .mode(NavigationMode.Stack)
+    .mode(isSplit(this.bp) ? NavigationMode.Split : NavigationMode.Stack)
+    .navBarWidth(SIDE_W + 60)
     .width('100%').height('100%')
   }
 }

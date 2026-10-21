@@ -19,6 +19,7 @@ import { BrowserTab } from '../view/BrowserTab';
 import { ProfilePage } from '../view/ProfilePage';
 import { StatsPage } from '../view/StatsPage';
 import { StudyTab } from '../view/StudyTab';
+import { BP_SM, RAIL_W, SK_BP, isSplit } from '../view/Layout';
 
 const DOMAIN: number = 0x0A01;
 const TAG: string = 'REPS-Index';
@@ -48,6 +49,8 @@ struct Index {
   /** 当前页面是否还有上一级可回。由各标签页写入 */
   @StorageLink(SK_CAN_BACK) canBack: boolean = false;
   @StorageLink(SK_BACK_REQ) backReq: number = 0;
+  /** 断点(见 view/Layout.ets)。横屏平板(lg)时标签栏改为左侧竖栏 */
+  @StorageLink(SK_BP) bp: string = BP_SM;
   @State private ready: boolean = false;
   @State private bootError: string = '';
 
@@ -186,7 +189,8 @@ struct Index {
           .fontColor(this.tint(i))
       }
     }
-    .width('100%').height('100%').justifyContent(FlexAlign.Center)
+    // 竖栏里每项固定高度、整组居中;底栏里每项撑满栏高
+    .width('100%').height(isSplit(this.bp) ? 72 : '100%').justifyContent(FlexAlign.Center)
     .accessibilityText(tabLabel(this.lang, i))
     .accessibilityLevel('yes')
   }
@@ -208,7 +212,9 @@ struct Index {
         .width('100%').height('100%').justifyContent(FlexAlign.Center)
         .backgroundColor('#0B0D12')
       } else {
-        Tabs({ barPosition: BarPosition.End, index: this.current }) {
+        // 横屏平板:标签栏放到左边竖着排(HarmonyOS 平板的侧边页签),内容区才有足够的宽度分栏。
+        // 手机 / 竖屏平板仍是底栏
+        Tabs({ barPosition: isSplit(this.bp) ? BarPosition.Start : BarPosition.End, index: this.current }) {
           TabContent() {
             StudyTab()
           }.tabBar(this.tabItem(0))
@@ -225,9 +231,13 @@ struct Index {
             ProfilePage()
           }.tabBar(this.tabItem(3))
         }
-        .barMode(BarMode.Fixed)
+        .vertical(isSplit(this.bp))
+        .barMode(isSplit(this.bp) ? BarMode.Scrollable : BarMode.Fixed)
         .onChange((index: number) => { this.current = index; })
-        .barHeight(this.immersive ? 0 : BAR_H)
+        .barWidth(isSplit(this.bp) ? (this.immersive ? 0 : RAIL_W) : '100%')
+        .barHeight(isSplit(this.bp) ? '100%' : (this.immersive ? 0 : BAR_H))
+        .barBackgroundColor('#FFFFFF')
+        .divider(isSplit(this.bp) && !this.immersive ? { strokeWidth: 1, color: '#E5E5EA' } : null)
         // **藏起标签栏不等于锁住手势。** Tabs 默认可以左右滑动切页,
         // 作答中一划就跳走,计时和专注都被打断 —— 所以沉浸时把滑动也关掉。
         .scrollable(!this.immersive)

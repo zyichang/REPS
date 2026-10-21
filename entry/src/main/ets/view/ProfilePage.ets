@@ -26,6 +26,7 @@ import {
 } from '../model/Steps';
 import { getFsrsParams, setFsrsParams } from '../srs/Srs';
 import { L, LANG_EN, LANG_ZH, algoLabels, fmt } from '../i18n/Strings';
+import { BP_SM, MAX_COL, SIDE_W, SK_BP, isSplit } from './Layout';
 
 /** 根页面显示哪一层。0 是菜单本身 */
 enum Sub {
@@ -72,6 +73,11 @@ export struct ProfilePage {
   @StorageLink(SK_LANG) lang: string = LANG_ZH;
   @StorageLink(SK_CAN_BACK) canBack: boolean = false;
   @StorageLink(SK_BACK_REQ) @Watch('onBackReq') backReq: number = 0;
+  /**
+   * 横屏平板(lg):像系统「设置」那样左右分栏 —— 左边菜单,右边是选中的那一节,
+   * 没选过就显示第一节(排期算法)。分栏时没有「返回上一层」,子页标题也不画 `‹`。
+   */
+  @StorageLink(SK_BP) @Watch('onBreakpoint') bp: string = BP_SM;
 
   aboutToAppear(): void {
     this.pull();
@@ -93,7 +99,17 @@ export struct ProfilePage {
   }
 
   private syncCanBack(): void {
-    this.canBack = this.sub !== Sub.Root;
+    // 分栏时两层同时在屏幕上,系统返回应当直接交给系统
+    this.canBack = this.sub !== Sub.Root && !isSplit(this.bp);
+  }
+
+  onBreakpoint(): void {
+    this.syncCanBack();
+  }
+
+  /** 分栏时右栏显示哪一节:没选过(Root)就是第一节 */
+  private detailSub(): Sub {
+    return this.sub === Sub.Root ? Sub.Algo : this.sub;
   }
 
   private enter(where: Sub): void {
@@ -242,7 +258,9 @@ export struct ProfilePage {
 
       Text('›').fontSize(22).fontColor('#C2C8D2')
     }
-    .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
+    .width('100%').padding(14).borderRadius(12)
+    // 分栏时右栏正显示的那一节用浅蓝底标出来
+    .backgroundColor(isSplit(this.bp) && this.detailSub() === section ? '#EAF1FE' : '#FAFAFC')
     .onClick(() => this.enter(section as Sub))
   }
 
@@ -290,8 +308,10 @@ export struct ProfilePage {
   @Builder
   subHeader(section: number) {
     Row({ space: 8 }) {
-      Text('‹').fontSize(28).fontColor('#1B2333')
-        .onClick(() => this.enter(Sub.Root))
+      if (!isSplit(this.bp)) {
+        Text('‹').fontSize(28).fontColor('#1B2333')
+          .onClick(() => this.enter(Sub.Root))
+      }
       Text(this.entryTitle(section)).fontSize(22).fontWeight(FontWeight.Bold)
         .layoutWeight(1)
     }
@@ -397,13 +417,53 @@ export struct ProfilePage {
    * 而且没有任何报错。只让 @Builder 提供 Scroll 的孩子就没事。
    */
   build() {
-    Scroll() {
-      this.currentBody()
+    if (isSplit(this.bp)) {
+      // 两个 Scroll 都写在 build() 里(见上面的说明),@Builder 只提供它们的孩子
+      Row() {
+        Scroll() {
+          this.menuBody()
+        }
+        .width(SIDE_W).height('100%')
+        .scrollable(ScrollDirection.Vertical)
+        .scrollBar(BarState.Auto)
+        .edgeEffect(EdgeEffect.Spring)
+        .align(Alignment.Top)
+
+        Divider().vertical(true).color('#E5E5EA')
+
+        Scroll() {
+          this.detailBody()
+        }
+        .layoutWeight(1).height('100%')
+        .scrollable(ScrollDirection.Vertical)
+        .scrollBar(BarState.Auto)
+        .edgeEffect(EdgeEffect.Spring)
+        .align(Alignment.Top)
+      }
+      .width('100%').height('100%').backgroundColor('#FFFFFF')
+    } else {
+      Scroll() {
+        this.currentBody()
+      }
+      .width('100%').height('100%').backgroundColor('#FFFFFF')
+      .scrollable(ScrollDirection.Vertical)
+      .scrollBar(BarState.Auto)
+      .edgeEffect(EdgeEffect.Spring)
     }
-    .width('100%').height('100%').backgroundColor('#FFFFFF')
-    .scrollable(ScrollDirection.Vertical)
-    .scrollBar(BarState.Auto)
-    .edgeEffect(EdgeEffect.Spring)
+  }
+
+  /** 分栏右栏:选中的那一节 */
+  @Builder
+  detailBody() {
+    if (this.detailSub() === Sub.SetParams) {
+      this.setBody()
+    } else if (this.detailSub() === Sub.Format) {
+      this.formatBody()
+    } else if (this.detailSub() === Sub.Language) {
+      this.langBody()
+    } else {
+      this.algoBody()
+    }
   }
 
   /** 按当前层给出 Scroll 的孩子 */
@@ -447,7 +507,7 @@ export struct ProfilePage {
       .alignItems(HorizontalAlign.Start)
     }
     .width('90%').padding({ bottom: 20 })
-    .constraintSize({ minHeight: '100%' })
+    .constraintSize({ minHeight: '100%', maxWidth: MAX_COL })
   }
 
   /** 排期算法子页:引擎二选一 + 目标保持率(它是 FSRS 的参数,归这里) */
@@ -471,7 +531,7 @@ export struct ProfilePage {
       .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
     }
     .width('90%').padding({ bottom: 20 })
-    .constraintSize({ minHeight: '100%' })
+    .constraintSize({ minHeight: '100%', maxWidth: MAX_COL })
   }
 
   /**
@@ -514,7 +574,7 @@ export struct ProfilePage {
       .borderRadius(12).backgroundColor('#FAFAFC')
     }
     .width('90%').padding({ bottom: 20 })
-    .constraintSize({ minHeight: '100%' })
+    .constraintSize({ minHeight: '100%', maxWidth: MAX_COL })
   }
 
   /** 导入格式子页:纯说明 */
@@ -539,7 +599,7 @@ export struct ProfilePage {
       .alignItems(HorizontalAlign.Start)
     }
     .width('90%').padding({ bottom: 20 })
-    .constraintSize({ minHeight: '100%' })
+    .constraintSize({ minHeight: '100%', maxWidth: MAX_COL })
   }
 
   /** 语言子页:跟随系统 / 中文 / English。说明属于整页,放在标题下面 */
@@ -560,6 +620,6 @@ export struct ProfilePage {
       .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
     }
     .width('90%').padding({ bottom: 20 })
-    .constraintSize({ minHeight: '100%' })
+    .constraintSize({ minHeight: '100%', maxWidth: MAX_COL })
   }
 }
