@@ -9,7 +9,7 @@ import { common } from '@kit.AbilityKit';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { Database } from './Database';
+import { Database, StoreResult } from './Database';
 import { ParsedCard, ParsedDeck, QuizifyError, parseOneCard, parseQuizify } from './Quizify';
 import { parseYamlDeck } from './Yaml';
 
@@ -39,6 +39,8 @@ export interface ImportResult {
   name: string;
   deck: string;
   cardsAdded: number;
+  /** 库里已经有、所以跳过的张数(重导同一个文件时就是全部) */
+  cardsSkipped: number;
   /** 文件里原本没有 front matter,卡组名是用文件名兜底的 */
   usedFallbackDeck: boolean;
   /** 用户在文件选择器里点了取消:不是错误,界面上什么都不用说 */
@@ -111,21 +113,12 @@ export function deckNameFromUri(uri: string): string {
  *
  * 一个文件一个卡组,名字就是 front matter 里的 deck ——
  * 卡组是平的,没有层级(见 Schema 里 decks 的注释)。
- * 已存在的指纹直接跳过 —— Task 7 会把「跳过」升级成「保留排期、更新内容」。
+ * **已存在的指纹直接跳过**,只插新卡,整次导入一个事务(Database.importDeck)。
+ * 以后可以把「跳过」升级成「保留排期、更新内容」。
  */
 export function storeDeck(db: Database, parsed: ParsedDeck, sourceFile: string,
-                          now: number): number {
-  const deckId: number = db.ensureDeck(parsed.deck);
-
-  let added = 0;
-  for (const c of parsed.cards) {
-    // **导入进来一张,落库就是一张。**挖空数不再决定卡片数(ADR-0002):
-    // 想让一句话产出多张卡,在源文件里自己写多张。
-    const ids: number[] = db.insertNote(deckId, parsed.deck, c.type, c.front, c.back,
-      c.title, c.key, c.options, c.answer, sourceFile, 1, now);
-    added += ids.length;
-  }
-  return added;
+                          now: number): StoreResult {
+  return db.importDeck(parsed, sourceFile, now);
 }
 
 /** 选文件 → 读 → 解析 → 落库。任何一步失败都返回 ok=false 而不抛异常 */
@@ -166,10 +159,13 @@ export async function importFromPicker(context: common.UIAbilityContext,
   }
 
   try {
-    const added: number = storeDeck(db, parsed, name, Date.now());
-    hilog.info(DOMAIN, TAG, '导入 %{public}s: %{public}d 张卡', parsed.deck, added);
+    const stored: StoreResult = storeDeck(db, parsed, name, Date.now());
+    const added: number = stored.added;
+    hilog.info(DOMAIN, TAG, '导入 %{public}s: 新增 %{public}d 张,跳过 %{public}d 张已有的',
+      parsed.deck, added, stored.skipped);
     return {
       ok: true, cancelled: false, name: name, deck: parsed.deck, cardsAdded: added,
+      cardsSkipped: stored.skipped,
       usedFallbackDeck: !parsed.hadFrontMatter, error: '',
     };
   } catch (e) {
@@ -178,5 +174,8 @@ export async function importFromPicker(context: common.UIAbilityContext,
 }
 
 function fail(name: string, error: string): ImportResult {
-  return { ok: false, cancelled: false, name: name, deck: '', cardsAdded: 0, usedFallbackDeck: false, error: error };
+  return {
+    ok: false, cancelled: false, name: name, deck: '', cardsAdded: 0, cardsSkipped: 0,
+    usedFallbackDeck: false, error: error,
+  };
 }

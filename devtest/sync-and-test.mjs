@@ -103,6 +103,7 @@ const suites = [
   'heatmap_test.ts',
   'history_test.ts',
   'checkin_test.ts',
+  'import_test.ts',
 ];
 
 for (const suite of suites) {

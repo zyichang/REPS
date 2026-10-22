@@ -34,8 +34,15 @@ import {
   SQL_STABILITY_IN_DECK, SQL_TODAY_PROGRESS, SQL_UNLEARNED_COUNT, SQL_UNTOUCHED_DUE,
   SQL_UPDATE_NOTE_TEXT, SQL_UPSERT_SCHEDULING, SchedulingRow, TodayProgress, fingerprintOf,
   fromSchedulingRow, isValidAlgo, makeUuid, schedulingValues, toSchedulingRow,
+  ImportPlan, SQL_HAS_FINGERPRINT, planImport,
 } from './Schema';
-import { ParsedCard } from './Quizify';
+import { ParsedCard, ParsedDeck } from './Quizify';
+
+/** importDeck 的结果 */
+export interface StoreResult {
+  added: number;
+  skipped: number;
+}
 
 const DOMAIN: number = 0x0A01;
 const TAG: string = 'REPS-DB';
@@ -643,6 +650,49 @@ export class Database {
    * (见 Quizify.parseOneCard),所以手工卡与导入卡的形状完全一致。
    * 返回新卡的 card id。
    */
+  /** 这个指纹在库里有没有(导入判断新旧卡、手工新建判断重复都用它) */
+  hasFingerprint(fp: string): boolean {
+    return this.scalar(SQL_HAS_FINGERPRINT, [fp] as Array<relationalStore.ValueType>) > 0;
+  }
+
+  /**
+   * 手工新建时:这个牌组里是不是已经有同一个标识键的卡了。
+   * 有的话插入会撞上 notes.fingerprint 的 UNIQUE —— 编辑页先问一声,给出能看懂的提示。
+   */
+  hasCardKey(deckName: string, key: string): boolean {
+    return this.hasFingerprint(fingerprintOf(deckName, key, 0));
+  }
+
+  /**
+   * 导入一份已解析的卡组:**指纹已在库里的是旧卡,跳过;只插新卡。**
+   *
+   * 整次导入一个事务:中途任何一张失败,全部回滚,库里不会留下导入了一半的文件。
+   * 新旧的判定是纯函数 Schema.planImport(桌面测试覆盖)。
+   */
+  importDeck(parsed: ParsedDeck, sourceFile: string, now: number): StoreResult {
+    const store = this.db();
+    store.beginTransaction();
+    try {
+      const deckId: number = this.ensureDeck(parsed.deck);
+      const keys: string[] = parsed.cards.map((c: ParsedCard) => c.key);
+      const plan: ImportPlan = planImport(parsed.deck, keys, (fp: string) => this.hasFingerprint(fp));
+      let added = 0;
+      for (const i of plan.fresh) {
+        const c: ParsedCard = parsed.cards[i];
+        // **导入进来一张,落库就是一张。**挖空数不再决定卡片数(ADR-0002)
+        const ids: number[] = this.insertNote(deckId, parsed.deck, c.type, c.front, c.back,
+          c.title, c.key, c.options, c.answer, sourceFile, 1, now);
+        added += ids.length;
+      }
+      store.commit();
+      return { added: added, skipped: plan.skipped };
+    } catch (e) {
+      store.rollBack();
+      hilog.error(DOMAIN, TAG, '导入失败,已回滚: %{public}s', `${e}`);
+      throw new Error(`${e}`);
+    }
+  }
+
   insertManualCard(deckId: number, deckName: string, c: ParsedCard, now: number): number {
     const ids: number[] = this.insertNote(deckId, deckName, c.type, c.front, c.back,
       c.title, c.key, c.options, c.answer, '手工添加', 1, now);

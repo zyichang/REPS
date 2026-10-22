@@ -564,6 +564,11 @@ struct CardEditPage {
       const db = appStore().getDb();
       const now: number = Date.now();
       if (this.isNew()) {
+        // 同一牌组里标识键重复会撞上 notes.fingerprint 的 UNIQUE:先问一声,给出能看懂的提示
+        if (db.hasCardKey(name, parsed.key)) {
+          this.error = fmt(L(this.lang).dupCardKey, parsed.key);
+          return;
+        }
         db.insertManualCard(this.deckId, name, parsed, now);
       } else {
         db.updateNoteText(this.args.noteId, parsed, now);

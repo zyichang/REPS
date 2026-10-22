@@ -166,6 +166,12 @@ export interface Dict {
  // ---- 状态提示 ----
   readFailed: string;
   importedTo: string;
+  /** 导入时有跳过:新增张数、牌组名、跳过张数(两种语言参数顺序一致) */
+  importedSkipped: string;
+  /** 重导了一个已经全部导入过的文件:牌组名、张数 */
+  importNothingNew: string;
+  /** 手工新建时同一牌组里已有同一个标识键的卡 */
+  dupCardKey: string;
   importFailed: string;
   clearedProgress: string;
   saveFailed: string;
@@ -327,6 +333,9 @@ const ZH: Dict = {
   pickHint: '选一个', correctMark: '答对', wrongMark: '答错',
 
  readFailed: '读取失败: %s', importedTo: '已导入 %d 张卡到「%s」',
+  importedSkipped: '已导入 %d 张卡到「%s」,跳过 %d 张已有的卡',
+  importNothingNew: '「%s」里已经有这 %d 张卡了,没有新卡',
+  dupCardKey: '这个牌组里已经有标识为「%s」的卡片了,请换一个标题或编号',
   importFailed: '导入失败:%s', 
   clearedProgress: '已清空「%s」的进度,%d 张卡全部变回新卡',
   saveFailed: '保存失败: %s', bootFailed: '启动失败: %s', openingDb: '正在打开数据库…',
@@ -461,6 +470,9 @@ const EN: Dict = {
   pickHint: 'Pick one', correctMark: 'Correct', wrongMark: 'Wrong',
 
  readFailed: 'Read failed: %s', importedTo: 'Imported %d cards into “%s”',
+  importedSkipped: 'Imported %d cards into “%s”, skipped %d already there',
+  importNothingNew: '“%s” already has all %d of these cards; nothing new',
+  dupCardKey: 'This deck already has a card identified as “%s”. Use a different title or number',
   importFailed: 'Import failed: %s', 
   
   clearedProgress: 'Cleared progress for “%s”; all %d cards are new again',

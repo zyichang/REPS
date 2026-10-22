@@ -18,7 +18,13 @@ export async function runImport(ctx: common.UIAbilityContext, lang: string): Pro
     const r: ImportResult = await importFromPicker(ctx, appStore().getDb());
     if (r.ok) {
       appStore().bump();
-      return fmt(L(lang).importedTo, r.cardsAdded, r.deck);
+      // 重导时旧卡一律跳过(指纹已在库里),所以要告诉用户跳过了多少
+      if (r.cardsAdded === 0 && r.cardsSkipped > 0) {
+        return fmt(L(lang).importNothingNew, r.deck, r.cardsSkipped);
+      }
+      return r.cardsSkipped > 0
+        ? fmt(L(lang).importedSkipped, r.cardsAdded, r.deck, r.cardsSkipped)
+        : fmt(L(lang).importedTo, r.cardsAdded, r.deck);
     }
     return r.cancelled ? '' : fmt(L(lang).importFailed, r.error);
   } catch (e) {

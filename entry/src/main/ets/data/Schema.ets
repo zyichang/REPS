@@ -840,6 +840,10 @@ export const SQL_STABILITY_IN_DECK: string =
 export const SQL_SELECT_NOTE_BY_FINGERPRINT: string =
   `SELECT id FROM notes WHERE fingerprint = ?`;
 
+/** 某个指纹在库里有没有。列名必须叫 n(Database.scalar 按名字取列) */
+export const SQL_HAS_FINGERPRINT: string =
+  `SELECT COUNT(*) AS n FROM notes WHERE fingerprint = ?`;
+
 /** 今日待学总量:到期卡数 + 新卡数,分两条查免得一条 SQL 里塞两种语义 */
 export const SQL_COUNT_DUE: string =
   `SELECT COUNT(*) AS n FROM scheduling WHERE due <= ?`;
@@ -1177,4 +1181,38 @@ export function fingerprintOf(deck: string, title: string, ordinal: number): str
     h = Math.imul(h, 0x01000193) >>> 0;
   }
   return h.toString(16).padStart(8, '0');
+}
+
+/** planImport 的结果:要插入的卡(下标)与跳过的张数 */
+export interface ImportPlan {
+  /** parsed.cards 里要新插入的那些的下标,保持文件里的顺序 */
+  fresh: number[];
+  /** 库里已有(或同一个文件里前面已经出现过)而跳过的张数 */
+  skipped: number;
+}
+
+/**
+ * 重导的核心判定:**指纹已在库里的卡就是旧卡,跳过;其余是新卡。**
+ *
+ * 原来的导入对每张卡直接 INSERT,靠 notes.fingerprint 的 UNIQUE 约束报错来「防重复」——
+ * 于是重导同一个文件会在第一张旧卡上失败,而排在它前面的新卡已经写进去了。
+ * 现在先按指纹分好新旧,只插新卡(调用方包事务)。
+ *
+ * 同一个文件里两张卡算出同一个指纹时(Quizify 已经拦住了键重复,这里是兜底),
+ * 第二张也算跳过,不会让 UNIQUE 中途抛错。纯函数:查库由 `exists` 注入,桌面测试能直接跑。
+ */
+export function planImport(deck: string, keys: string[], exists: (fp: string) => boolean): ImportPlan {
+  const fresh: number[] = [];
+  const seen = new Set<string>();
+  let skipped = 0;
+  for (let i = 0; i < keys.length; i++) {
+    const fp: string = fingerprintOf(deck, keys[i], 0);
+    if (seen.has(fp) || exists(fp)) {
+      skipped++;
+    } else {
+      fresh.push(i);
+    }
+    seen.add(fp);
+  }
+  return { fresh: fresh, skipped: skipped };
 }
