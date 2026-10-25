@@ -226,5 +226,22 @@ check('无语言名时 lang 为空串', b4[0].lang === '', `"${b4[0].lang}"`);
 const b5 = splitBlocks('```\na * b + $x$\n```');
 check('代码块原文含 * 与 $', b5[0].text === 'a * b + $x$', b5[0].text);
 
+// 粗体 / 高亮里的公式(FSRS 那张卡:**$D$ —— Difficulty**)
+function shape(sp: InlineSpan[]): string {
+  return sp.map((x: InlineSpan) => `${x.kind}:${x.text}`).join('|');
+}
+const bm = parseInline('1. **$D$ —— Difficulty（难度）**，取值 $[1, 10]$');
+check('粗体里的 $D$ 拆成公式片段,其余仍是粗体',
+  shape(bm) === `0:1. |6:$D$|1: —— Difficulty（难度）|0:，取值 |6:$[1, 10]$`, shape(bm));
+check('粗体里有公式时 hasMath 那条路能看到 Math', bm.some((x: InlineSpan) => x.kind === InlineKind.Math));
+const hm = parseInline('==当 $DR = 0.9$ 时==');
+check('高亮里的公式也拆出来', shape(hm) === `2:当 |6:$DR = 0.9$|2: 时`, shape(hm));
+const money = parseInline('**价格 $5 起**');
+check('粗体里落单的 $ 不当公式', shape(money) === '1:价格 $5 起', shape(money));
+const plainBold = parseInline('**加粗** 普通');
+check('没有公式的粗体不变', shape(plainBold) === '1:加粗|0: 普通', shape(plainBold));
+const mathFirst = parseInline('$a**b$ 和 **c**');
+check('公式里的 ** 仍不当粗体', shape(mathFirst) === '6:$a**b$|0: 和 |1:c', shape(mathFirst));
+
 console.log(`\n===== 结果: ${pass} 通过 / ${fail} 失败 =====`);
 process.exit(fail === 0 ? 0 : 1);

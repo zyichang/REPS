@@ -138,7 +138,12 @@ export function parseInline(text: string): InlineSpan[] {
         continue;
       }
       pushPlain();
-      out.push({ text: inner, kind: m.kind });
+      if (m.kind === InlineKind.Bold || m.kind === InlineKind.Highlight) {
+        // 粗体 / 高亮里允许有公式:`**$D$ —— 难度**`。不拆的话 $D$ 会当成粗体文字原样显示
+        splitMath(inner, m.kind, out);
+      } else {
+        out.push({ text: inner, kind: m.kind });
+      }
       i = end + m.close.length;
       matched = true;
       break;
@@ -153,6 +158,35 @@ export function parseInline(text: string): InlineSpan[] {
 
   pushPlain();
   return out;
+}
+
+/**
+ * 把一段带样式的文字按 `$…$` / `$$…$$` 拆开:公式部分成 Math 片段,其余保持 kind。
+ * 没有配对的 `$`(比如价格「$5」)不算公式,原样留在文字里。
+ */
+function splitMath(inner: string, kind: InlineKind, out: InlineSpan[]): void {
+  let i = 0;
+  let text = '';
+  while (i < inner.length) {
+    if (inner.charAt(i) === '$') {
+      const marker = inner.startsWith('$$', i) ? '$$' : '$';
+      const end = inner.indexOf(marker, i + marker.length);
+      if (end > 0) {
+        if (text.length > 0) {
+          out.push({ text: text, kind: kind });
+          text = '';
+        }
+        out.push({ text: inner.substring(i, end + marker.length), kind: InlineKind.Math });
+        i = end + marker.length;
+        continue;
+      }
+    }
+    text += inner.charAt(i);
+    i++;
+  }
+  if (text.length > 0) {
+    out.push({ text: text, kind: kind });
+  }
 }
 
 /** 只要纯文本(用于搜索、导出比对等场景) */
