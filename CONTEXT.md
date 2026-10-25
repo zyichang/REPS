@@ -157,6 +157,16 @@ Error 子类型再抛,例如 `throw new QuizifyError(\`…: ${detail}\`, line)`�
 要同时显示多种后缀,合成一项:`['描述|.yaml,.yml,.md']`。写成四个元素时 YAML 文件在选择器里根本看不见。
 往模拟器推测试文件用 `devtest/push_testdata.sh`(放进 Documents;Download 里推进去的文件选择器不显示)。
 
+**7. AGC 云数据库对象类型 JSON:控制台「导入」的格式和 DevEco 模板不一样。**
+2026-10-25 试了三次才导入成功(最终文件 `cloud/clouddb/reps_sync.json`,存储区叫 `REPS`):
+- 权限要放在**顶层** `permissions: [{ objectTypeName, permissions: [...] }]`;放在对象类型里面(DevEco 模板
+  `[CloudDev]Empty Ability/.../clouddb/objecttype/Post.json` 的写法)会报「对象类型未设置权限」。
+- **非空且非主键的字段必须有 `defaultValue`,写成字符串**(`""`、`"0"`、`"false"`),否则报「非空情况下未设置默认值」。
+  主键不写默认值。
+- Long / Text / Boolean 都可用(模板里只出现了 String / Integer / Date)。
+- agcli 1.12.0 的 `db import-object` 报 502,只能在控制台导入;但 `db list-zone` / `list-object` 可用于只读核对。
+- 写这类配置文件之前先找官方样例对照,不要凭记忆。
+
 ## 还没决定
 
 - **「一本书 → 卡组」的自动切分还没解决。**
