@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- 方向 B:正字计数。一笔一次,一个「正」= 五次 = 一组;最后一笔(蓝)是今天刻意补上的那一下 -->
+  <rect width="1024" height="1024" fill="#0B0D12"/>
+  <g stroke-linecap="round" stroke-width="66" fill="none">
+    <line x1="318" y1="322" x2="706" y2="322" stroke="#FFFFFF"/>   <!-- 1 上横 -->
+    <line x1="512" y1="322" x2="512" y2="700" stroke="#FFFFFF"/>   <!-- 2 中竖 -->
+    <line x1="512" y1="508" x2="672" y2="508" stroke="#FFFFFF"/>   <!-- 3 右短横 -->
+    <line x1="358" y1="510" x2="358" y2="700" stroke="#FFFFFF"/>   <!-- 4 左短竖 -->
+    <line x1="294" y1="700" x2="730" y2="700" stroke="#3B82F6"/>   <!-- 5 底横:今天这一笔 -->
+  </g>
+</svg>

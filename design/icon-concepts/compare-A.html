@@ -1,0 +1,21 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+body{margin:0;padding:32px;background:#F2F2F7;font-family:"Microsoft YaHei",sans-serif;color:#1C1C1E}
+h1{font-size:28px;margin:0 0 24px}
+.row{display:flex;align-items:center;gap:32px;padding:20px 24px;margin-bottom:16px;background:#fff;border-radius:20px}
+.name{width:200px;font-size:22px;font-weight:600}.name small{display:block;font-weight:400;font-size:15px;color:#8A8A8E;margin-top:6px}
+img{display:block}.raw{width:200px;height:200px}.mask{overflow:hidden;border-radius:22.5%}
+.m200{width:200px;height:200px}.m96{width:96px;height:96px}.m48{width:48px;height:48px}
+.desk{padding:16px;border-radius:16px;display:flex;gap:14px;align-items:center}
+.dk{background:linear-gradient(135deg,#1d2a44,#0e1626)}.lt{background:linear-gradient(135deg,#dfe9f7,#f6f1e8)}
+.cap{font-size:13px;color:#8A8A8E;text-align:center;margin-top:6px}
+</style></head><body>
+<h1>方案 A:原版 · 叠卡深色 · 叠卡浅色</h1>
+<script>
+const items=[['A-card-loop.svg','A 原版','一张卡'],['A2-stack-dark.svg','A 叠卡 · 深色','前卡不变,后面两张错开'],['A2-stack-light.svg','A 叠卡 · 浅色','同一构图,黑白反过来']];
+for(const [f,n,s] of items){document.write(`<div class="row"><div class="name">${n}<small>${s}</small></div>
+<div><div class="mask m200"><img class="m200" src="${f}"></div><div class="cap">遮罩后</div></div>
+<div><div class="mask m96"><img class="m96" src="${f}"></div><div class="cap">96px</div></div>
+<div><div class="mask m48"><img class="m48" src="${f}"></div><div class="cap">48px</div></div>
+<div><div class="desk dk"><div class="mask m48"><img class="m48" src="${f}"></div><div class="mask m48"><img class="m48" src="${f}"></div></div><div class="cap">深色桌面</div></div>
+<div><div class="desk lt"><div class="mask m48"><img class="m48" src="${f}"></div><div class="mask m48"><img class="m48" src="${f}"></div></div><div class="cap">浅色桌面</div></div></div>`)}
+</script></body></html>

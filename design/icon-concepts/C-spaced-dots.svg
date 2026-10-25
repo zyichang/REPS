@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- 方向 C:间隔越来越大的点 = 间隔重复(1、2、4、7 天…),整体向上像记忆曲线 -->
+  <rect width="1024" height="1024" fill="#0B0D12"/>
+  <g fill="#FFFFFF">
+    <circle cx="262" cy="660" r="54"/>
+    <circle cx="372" cy="612" r="54"/>
+    <circle cx="486" cy="568" r="54"/>
+    <circle cx="616" cy="500" r="54"/>
+  </g>
+  <circle cx="770" cy="380" r="70" fill="#3B82F6"/>
+</svg>
