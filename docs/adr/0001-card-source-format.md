@@ -1,6 +1,6 @@
 # ADR-0001 · 卡片来源格式:保留 Quizify Markdown,结构化卡组走 JSON
 
-- **状态**:已接受(其中挖空拆卡的描述已由 **ADR-0002** 取代)
+- **状态**:**已被 ADR-0007 取代**(2026-10-25,主格式改为 REPS Card YAML v1,Quizify 降为兼容导入)。此前:已接受(其中挖空拆卡的描述已由 **ADR-0002** 取代)
 - **日期**:2026-09-24
 - **相关**:`entry/src/main/ets/data/Quizify.ets`、`Inline.ets`、`Importer.ets`
 

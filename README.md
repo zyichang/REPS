@@ -52,31 +52,35 @@ REPS 想做的是把它做成一个普通人愿意每天打开的样子。
 
 ## Import format
 
-导入格式是 **Quizify Card Markdown v1** —— 和
-[Anki 的 Quizify Markdown 插件](https://github.com/e-chehil/anki-quizify)同一套语法:
+主格式是 **REPS Card YAML v1**(ADR-0007)。完整字段表、数据库结构、卡片身份与云同步见
+**[docs/data-model.md](docs/data-model.md)**。
 
-```markdown
----
-quizify:
-  format: 1
-  deck: DataStructure::Chapter_2
-  tags: [DataStructure, 第二章]
----
+```yaml
+reps: 1
+deck: 数据结构
+tags: [DataStructure, 第二章]
+cards:
+  - type: qa
+    front: "顺序表按下标随机访问的时间复杂度是多少?"
+    back: "$O(1)$ —— 元素地址可由下标直接算出。"
 
-+++
+  - type: choice
+    title: "基础选择 (1)"
+    front: "一个算法应该是( )。"
+    options: ["程序", "问题求解步骤的描述"]
+    answer: B
+    back: "算法是**问题求解步骤的描述**,程序是算法在计算机上的特定实现。"
 
-#### 基础选择 (1) 一个算法应该是（　）。
-
-;;;
-A. 程序
-B. 问题求解步骤的描述
-;;;B
-***
-算法是**问题求解步骤的描述**,程序是算法在计算机上的特定实现。
+  - type: cloze
+    front: "三种基本结构是 {{顺序}}、{{选择}} 和 {{循环}}。"
 ```
 
-`+++` 起一张卡的正面,`***` 切到背面,`;;;` 块是选择题,`{{挖空}}` 是完形填空。
-选这个格式的好处是双向的:已有的 Anki 卡组能直接导进来,REPS 的卡组也能导回 Anki。
+- 选择题的选项按顺序自动编成 A、B、C…,`answer` 写字母;写成 `[A, C]` 就是多选。
+- 文字一律用引号或 `|` 块,行内只用标准 Markdown、`$公式$` 和 `{{挖空}}`。
+- 分享出去的文件只有内容,不带任何学习记录。
+
+**兼容导入:** [Quizify Card Markdown](https://github.com/e-chehil/anki-quizify)(`+++` / `***` / `;;;`)
+仍然可以导入。REPS 的解析器是自己写的,没有使用该项目(AGPL-3.0)的代码。
 
 ## Status
 
