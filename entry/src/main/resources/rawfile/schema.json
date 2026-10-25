@@ -1,0 +1,132 @@
+{
+	"schemaVersion": 1,
+	"objectTypes": [
+		{
+			"objectTypeName": "reps_sync",
+			"fields": [
+				{
+					"fieldName": "id",
+					"fieldType": "String",
+					"belongPrimaryKey": true,
+					"notNull": true,
+					"isNeedEncrypt": false,
+					"isSensitive": false
+				},
+				{
+					"fieldName": "uid",
+					"fieldType": "String",
+					"belongPrimaryKey": false,
+					"notNull": true,
+					"isNeedEncrypt": false,
+					"isSensitive": false,
+					"defaultValue": ""
+				},
+				{
+					"fieldName": "kind",
+					"fieldType": "String",
+					"belongPrimaryKey": false,
+					"notNull": true,
+					"isNeedEncrypt": false,
+					"isSensitive": false,
+					"defaultValue": ""
+				},
+				{
+					"fieldName": "key",
+					"fieldType": "String",
+					"belongPrimaryKey": false,
+					"notNull": true,
+					"isNeedEncrypt": false,
+					"isSensitive": false,
+					"defaultValue": ""
+				},
+				{
+					"fieldName": "data",
+					"fieldType": "Text",
+					"belongPrimaryKey": false,
+					"notNull": false,
+					"isNeedEncrypt": false,
+					"isSensitive": false
+				},
+				{
+					"fieldName": "updated_at",
+					"fieldType": "Long",
+					"belongPrimaryKey": false,
+					"notNull": true,
+					"isNeedEncrypt": false,
+					"isSensitive": false,
+					"defaultValue": "0"
+				},
+				{
+					"fieldName": "synced_at",
+					"fieldType": "Long",
+					"belongPrimaryKey": false,
+					"notNull": true,
+					"isNeedEncrypt": false,
+					"isSensitive": false,
+					"defaultValue": "0"
+				},
+				{
+					"fieldName": "deleted",
+					"fieldType": "Boolean",
+					"belongPrimaryKey": false,
+					"notNull": true,
+					"isNeedEncrypt": false,
+					"isSensitive": false,
+					"defaultValue": "false"
+				}
+			],
+			"indexes": [
+				{
+					"indexName": "idx_uid_kind_synced",
+					"indexList": [
+						{
+							"fieldName": "uid",
+							"sortType": "ASC"
+						},
+						{
+							"fieldName": "kind",
+							"sortType": "ASC"
+						},
+						{
+							"fieldName": "synced_at",
+							"sortType": "ASC"
+						}
+					]
+				}
+			]
+		}
+	],
+	"permissions": [
+		{
+			"objectTypeName": "reps_sync",
+			"permissions": [
+				{
+					"role": "World",
+					"rights": []
+				},
+				{
+					"role": "Authenticated",
+					"rights": [
+						"Upsert"
+					]
+				},
+				{
+					"role": "Creator",
+					"rights": [
+						"Read",
+						"Upsert",
+						"Delete"
+					]
+				},
+				{
+					"role": "Administrator",
+					"rights": [
+						"Read",
+						"Upsert",
+						"Delete"
+					]
+				}
+			]
+		}
+	]
+}

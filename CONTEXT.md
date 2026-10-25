@@ -166,6 +166,10 @@ Error 子类型再抛,例如 `throw new QuizifyError(\`…: ${detail}\`, line)`�
 - Long / Text / Boolean 都可用(模板里只出现了 String / Integer / Date)。
 - agcli 1.12.0 的 `db import-object` 报 502,只能在控制台导入;但 `db list-zone` / `list-object` 可用于只读核对。
 - 写这类配置文件之前先找官方样例对照,不要凭记忆。
+- **端侧还要一份 `entry/src/main/resources/rawfile/schema.json`**(对象类型 + 权限),没有它 cloudDatabase 报
+  「schema parse fail or objectTypeName error」。用 `agcli db export-object -d <目录>` 导出,改名放进 rawfile。
+  对象类型一改就要重新导出。核对云端数据:`agcli db export-data --mode Local --encryptMode UnEncrypt --zone REPS --object reps_sync --path <目录>`。
+- agcli 偶尔报 ERR_SERVER_AUTH / ERR_SERVER_BAD_GATEWAY,隔一会儿重试就好,不是项目没选的问题。
 
 ## 还没决定
 
