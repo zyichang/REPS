@@ -169,6 +169,13 @@ export interface Dict {
   accountSwitchTitle: string;
   accountSwitchHint: string;
   accountSignOutHint: string;
+  accountSyncNever: string;
+  /** 上次同步的时刻 */
+  accountSyncLast: string;
+  accountSyncNow: string;
+  accountSyncRunning: string;
+  /** 同步失败:原因 */
+  accountSyncError: string;
   aboutSection: string;
   aboutTagline: string;
   aboutLocal: string;
@@ -365,7 +372,7 @@ const ZH: Dict = {
   accountSignIn: '使用华为账号登录',
   accountWorking: '请稍候…',
   accountSignedIn: '已登录 · %s',
-  accountSyncHint: '多设备同步即将上线。退出登录不会删除本机的任何数据。',
+  accountSyncHint: '同步打卡、热力图、牌组和学习进度。学完一轮、回到前台时自动同步;失败不影响学习,下次再试。',
   accountSignOut: '退出登录',
   accountFailed: '操作失败:%s',
   accountUnavailable: '这个版本没有配置华为账号服务(缺少 agconnect-services.json)',
@@ -380,6 +387,11 @@ const ZH: Dict = {
   accountSwitchHint: '鸿蒙上的华为账号登录使用的是系统里登录的账号。要换成另一个华为账号:先在这里退出登录,'
     + '到系统「设置 → 华为账号」切换账号,再回来登录。不同账号的云端数据互不相通。',
   accountSignOutHint: '退出后,这台设备上的牌组、进度和打卡都还在,只是不再同步。',
+  accountSyncNever: '还没有同步过',
+  accountSyncLast: '上次同步 %s',
+  accountSyncNow: '立即同步',
+  accountSyncRunning: '同步中…',
+  accountSyncError: '上次同步失败:%s',
   aboutSection: '关于',
   aboutTagline: '一天的学习量是 a set,一次作答是 a rep。',
   aboutLocal: '本地优先:卡片来自你自己的文件,排期算在设备上,数据库在应用沙箱里。'
@@ -529,7 +541,7 @@ const EN: Dict = {
   accountSignIn: 'Sign in with HUAWEI ID',
   accountWorking: 'Please wait…',
   accountSignedIn: 'Signed in · %s',
-  accountSyncHint: 'Multi-device sync is coming soon. Signing out never deletes anything on this device.',
+  accountSyncHint: 'Syncs check-ins, the heatmap, decks and progress — automatically after each session and when the app comes back. A failed sync never interrupts studying; it retries next time.',
   accountSignOut: 'Sign out',
   accountFailed: 'Failed: %s',
   accountUnavailable: 'HUAWEI ID is not configured in this build (agconnect-services.json is missing)',
@@ -544,6 +556,11 @@ const EN: Dict = {
   accountSwitchHint: 'HUAWEI ID sign-in uses the account signed in to the system. To use a different one: sign out here, '
     + 'switch accounts in Settings → HUAWEI ID, then sign in again. Different accounts never share cloud data.',
   accountSignOutHint: 'After signing out, your decks, progress and check-ins stay on this device; they just stop syncing.',
+  accountSyncNever: 'Not synced yet',
+  accountSyncLast: 'Last synced %s',
+  accountSyncNow: 'Sync now',
+  accountSyncRunning: 'Syncing…',
+  accountSyncError: 'Last sync failed: %s',
   aboutSection: 'About',
   aboutTagline: "A day's workload is a set; one answer is a rep.",
   aboutLocal: 'Local first: cards come from your own files, scheduling is computed on device, and the '

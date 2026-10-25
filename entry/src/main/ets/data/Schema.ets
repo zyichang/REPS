@@ -960,6 +960,24 @@ export const SQL_META_VALUE: string = `SELECT value FROM meta WHERE key = ?`;
 // ---------------------------------------------------------------- 删除墓碑(Task 8)
 
 /**
+ * 卡片的**同步键** = `牌组uuid/文件里的 id`(与导出 YAML 一致)。
+ *
+ * 不能直接用 notes.uuid:Task 4 之前导入的卡 notes.uuid 是随机 uuid(没有牌组前缀),
+ * 而另一台设备从导出的 YAML 导入后存的是 `牌组uuid/那个 uuid` —— 同一张卡两边不一样。
+ * 取「导出时写进文件的 id」再加牌组前缀,两台设备就对得上。与 YamlExport.cardIdOf 同一规则。
+ */
+export function cardSyncKey(deckUuid: string, noteUuid: string): string {
+  const prefix = `${deckUuid}/`;
+  return noteUuid.startsWith(prefix) ? noteUuid : prefix + noteUuid;
+}
+
+/** 同步键拆回 [牌组 uuid, 文件里的 id]。牌组 uuid 本身不含 / */
+export function splitCardSyncKey(key: string): string[] {
+  const i = key.indexOf('/');
+  return i < 0 ? ['', key] : [key.substring(0, i), key.substring(i + 1)];
+}
+
+/**
  * 本地删除照旧是真删;**在删之前**记下墓碑,同步时作为 deleted = true 的记录传给其他设备。
  * 卡片的墓碑表示「这张卡没有排期了」:删卡、删牌组、清空进度三种情况都记。
  * 参数一律 (now, id)。
@@ -969,15 +987,21 @@ export const SQL_TOMBSTONE_DECK: string =
    SELECT 'deck', uuid, ? FROM decks WHERE id = ? AND uuid <> ''`;
 export const SQL_TOMBSTONE_DECK_CARDS: string =
   `INSERT OR REPLACE INTO sync_tombstones (kind, uuid, deleted_at)
-   SELECT 'card', c.uuid, ? FROM cards c JOIN notes n ON n.id = c.note_id WHERE n.deck_id = ?`;
+   SELECT 'card', d.uuid || '/' || (CASE WHEN substr(n.uuid, 1, length(d.uuid) + 1) = d.uuid || '/'
+                         THEN substr(n.uuid, length(d.uuid) + 2) ELSE n.uuid END), ?
+     FROM notes n JOIN decks d ON d.id = n.deck_id WHERE n.deck_id = ?`;
 export const SQL_TOMBSTONE_NOTE_CARDS: string =
   `INSERT OR REPLACE INTO sync_tombstones (kind, uuid, deleted_at)
-   SELECT 'card', uuid, ? FROM cards WHERE note_id = ?`;
+   SELECT 'card', d.uuid || '/' || (CASE WHEN substr(n.uuid, 1, length(d.uuid) + 1) = d.uuid || '/'
+                         THEN substr(n.uuid, length(d.uuid) + 2) ELSE n.uuid END), ?
+     FROM notes n JOIN decks d ON d.id = n.deck_id WHERE n.id = ?`;
 /** 清空进度只给**有排期**的卡记墓碑(新卡本来就没有排期,不用传) */
 export const SQL_TOMBSTONE_DECK_SCHED: string =
   `INSERT OR REPLACE INTO sync_tombstones (kind, uuid, deleted_at)
-   SELECT 'card', c.uuid, ? FROM scheduling s JOIN cards c ON c.id = s.card_id
-     JOIN notes n ON n.id = c.note_id WHERE n.deck_id = ?`;
+   SELECT 'card', d.uuid || '/' || (CASE WHEN substr(n.uuid, 1, length(d.uuid) + 1) = d.uuid || '/'
+                         THEN substr(n.uuid, length(d.uuid) + 2) ELSE n.uuid END), ?
+     FROM scheduling s JOIN cards c ON c.id = s.card_id JOIN notes n ON n.id = c.note_id
+     JOIN decks d ON d.id = n.deck_id WHERE n.deck_id = ?`;
 /** 同一个 uuid 又活过来了(重新导入 / 又学了),墓碑作废。参数:(kind, uuid) */
 export const SQL_DROP_TOMBSTONE: string = `DELETE FROM sync_tombstones WHERE kind = ? AND uuid = ?`;
 /** 某类的墓碑,deleted_at > ? */
@@ -1002,12 +1026,22 @@ export const SQL_SYNC_DAYS_SINCE: string =
 export const SQL_SYNC_DECKS_SINCE: string = `SELECT uuid, name, updated_at FROM decks WHERE updated_at > ? AND uuid <> ''`;
 export const SQL_SYNC_DECK_BY_UUID: string = `SELECT id, updated_at FROM decks WHERE uuid = ?`;
 
-/** 卡片排期:updated_at > ? 的,带卡片 uuid */
+/** 卡片排期:updated_at > ? 的,带同步键(列名 uuid) */
 export const SQL_SYNC_SCHED_SINCE: string =
-  `SELECT c.uuid AS uuid, s.* FROM scheduling s JOIN cards c ON c.id = s.card_id WHERE s.updated_at > ?`;
-export const SQL_SYNC_SCHED_BY_UUID: string =
-  `SELECT s.updated_at AS updated_at FROM scheduling s JOIN cards c ON c.id = s.card_id WHERE c.uuid = ?`;
-export const SQL_CARD_ID_BY_UUID: string = `SELECT id FROM cards WHERE uuid = ?`;
+  `SELECT d.uuid || '/' || (CASE WHEN substr(n.uuid, 1, length(d.uuid) + 1) = d.uuid || '/'
+                         THEN substr(n.uuid, length(d.uuid) + 2) ELSE n.uuid END) AS uuid, s.*
+     FROM scheduling s JOIN cards c ON c.id = s.card_id JOIN notes n ON n.id = c.note_id
+     JOIN decks d ON d.id = n.deck_id
+    WHERE s.updated_at > ?`;
+/**
+ * 按同步键找本机的卡。参数:(牌组 uuid, 牌组uuid/id, id) —— 新卡存的是带前缀的,Task 4 之前的卡存的是裸 id。
+ * updated_at 是这张卡排期的时刻,没有排期为 -1。
+ */
+export const SQL_CARD_BY_SYNC_KEY: string =
+  `SELECT c.id AS card_id, COALESCE(s.updated_at, -1) AS updated_at
+     FROM cards c JOIN notes n ON n.id = c.note_id JOIN decks d ON d.id = n.deck_id
+     LEFT JOIN scheduling s ON s.card_id = c.id
+    WHERE d.uuid = ? AND (n.uuid = ? OR n.uuid = ?) LIMIT 1`;
 export const SQL_TOMBSTONE_AT: string = `SELECT deleted_at FROM sync_tombstones WHERE kind = ? AND uuid = ?`;
 /** 云端来的墓碑写进本地(时刻用云端的,不能用现在 —— 否则会被当成本地新改动再传回去) */
 export const SQL_PUT_TOMBSTONE: string =
@@ -1016,9 +1050,16 @@ export const SQL_DELETE_SCHED_BY_CARD: string = `DELETE FROM scheduling WHERE ca
 /** 应用云端排期后把 updated_at 设成云端那条的(不是 last_review),参数:(updated_at, card_id) */
 export const SQL_SET_SCHED_UPDATED: string = `UPDATE scheduling SET updated_at = ? WHERE card_id = ?`;
 
-/** 同步水位存在 meta 表 */
-export const META_SYNC_PUSH: string = 'sync_last_push';
-export const META_SYNC_PULL: string = 'sync_last_pull';
+/** 应用云端牌组后把 updated_at 设成云端那条的(不是现在),否则两台设备会来回互相重传 */
+export const SQL_SET_DECK_UPDATED: string = `UPDATE decks SET updated_at = ? WHERE uuid = ?`;
+
+/** 同步水位存在 meta 表,**按 uid 分开**:换了账号要从头同步 */
+export function metaSyncPushKey(uid: string): string {
+  return `sync_last_push:${uid}`;
+}
+export function metaSyncPullKey(uid: string): string {
+  return `sync_last_pull:${uid}`;
+}
 
 /**
  * 全量保持率:答对(评级 >= 良好)占**除首答以外**全部作答的比例。

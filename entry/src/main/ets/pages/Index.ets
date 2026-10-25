@@ -20,6 +20,8 @@ import { ProfilePage } from '../view/ProfilePage';
 import { StatsPage } from '../view/StatsPage';
 import { StudyTab } from '../view/StudyTab';
 import { BP_SM, RAIL_W, SK_BP, isSplit } from '../view/Layout';
+import { SK_UID } from '../data/Account';
+import { loadSyncStatus, syncNow } from '../data/SyncService';
 
 const DOMAIN: number = 0x0A01;
 const TAG: string = 'REPS-Index';
@@ -84,6 +86,9 @@ struct Index {
       await appStore().init(ctx);
       this.ready = true;
       hilog.info(DOMAIN, TAG, '主框架就绪');
+      // 已登录的话启动时同步一轮(不登录什么都不做,不发请求)
+      loadSyncStatus(AppStorage.get<string>(SK_UID) ?? '');
+      syncNow(ctx, '启动', false);
     } catch (e) {
       this.bootError = fmt(L(this.lang).bootFailed, `${e}`);
       hilog.error(DOMAIN, TAG, '启动失败 %{public}s', String(e));

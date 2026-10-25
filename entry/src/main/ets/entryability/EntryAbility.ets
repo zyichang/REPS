@@ -4,6 +4,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { KeyboardAvoidMode, window } from '@kit.ArkUI';
 import { SK_BP, breakpointOf } from '../view/Layout';
 import { initAccount } from '../data/Account';
+import { syncNow } from '../data/SyncService';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'REPS';
@@ -75,6 +76,8 @@ export default class EntryAbility extends UIAbility {
 
   onForeground(): void {
     hilog.info(DOMAIN, TAG, 'onForeground');
+    // 回到前台:另一台设备可能刚学过(60 秒内不重复,未登录直接返回)
+    syncNow(this.context, '回到前台', false);
   }
 
   onBackground(): void {

@@ -8,9 +8,9 @@
 import {
   DAY_CUTOFF_MS, DailyStatRow, DayStat, SQL_DAY_STATS, SQL_DROP_TOMBSTONE, SQL_REMOTE_DAY_STATS,
   SQL_TOMBSTONES_SINCE, SQL_TOMBSTONE_DECK, SQL_TOMBSTONE_DECK_CARDS, SQL_TOMBSTONE_DECK_SCHED,
-  SQL_TOMBSTONE_NOTE_CARDS, SQL_UPSERT_REMOTE_DAY_STAT, SQL_CARD_ID_BY_UUID, SQL_DELETE_SCHED_BY_CARD,
+  SQL_TOMBSTONE_NOTE_CARDS, SQL_UPSERT_REMOTE_DAY_STAT, SQL_CARD_BY_SYNC_KEY, SQL_DELETE_SCHED_BY_CARD, SQL_SET_DECK_UPDATED, cardSyncKey, splitCardSyncKey,
   SQL_PUT_TOMBSTONE, SQL_SET_SCHED_UPDATED, SQL_SYNC_CHECKINS_SINCE, SQL_SYNC_CHECKIN_TS, SQL_SYNC_DAYS_SINCE,
-  SQL_SYNC_DECKS_SINCE, SQL_SYNC_DECK_BY_UUID, SQL_SYNC_SCHED_BY_UUID, SQL_SYNC_SCHED_SINCE, SQL_TOMBSTONE_AT,
+  SQL_SYNC_DECKS_SINCE, SQL_SYNC_DECK_BY_UUID, SQL_SYNC_SCHED_SINCE, SQL_TOMBSTONE_AT,
   dayAnchor, dayIndex, dayStart, heatCells, mergeDayStats, projectDailyStats,
 } from './Schema';
 import { freshDb } from './importsim';
@@ -120,16 +120,38 @@ check('只有最近作答过的那天要上传', days.length === 1 && days[0].da
   JSON.stringify(days));
 check('牌组增量', (s.prepare(SQL_SYNC_DECKS_SINCE).all(100) as { uuid: string }[]).map((r) => r.uuid).join() === 'deck-A');
 check('按 uuid 找牌组', (s.prepare(SQL_SYNC_DECK_BY_UUID).get('deck-B') as { id: number }).id === 2);
-const sc = s.prepare(SQL_SYNC_SCHED_SINCE).all(600) as { uuid: string; stability: number }[];
-check('排期增量带卡片 uuid', sc.length === 1 && sc[0].uuid === 'deck-A/c1' && sc[0].stability === 3.5, JSON.stringify(sc));
-check('按卡片 uuid 取排期时刻', (s.prepare(SQL_SYNC_SCHED_BY_UUID).get('deck-A/c1') as { updated_at: number }).updated_at === 700);
-check('按 uuid 找卡', (s.prepare(SQL_CARD_ID_BY_UUID).get('deck-A/c1') as { id: number }).id === 1);
+// 一张 Task 4 之前导入的卡:notes.uuid 是裸 uuid,没有牌组前缀
+s.exec(`INSERT INTO notes (id, deck_id, front, fingerprint, uuid) VALUES (2, 1, 'q2', 'f2', 'legacy-v4')`);
+s.exec(`INSERT INTO cards (id, note_id, uuid) VALUES (2, 2, 'random-card-uuid')`);
+s.exec(`INSERT INTO scheduling (card_id, stability, last_review, due, updated_at) VALUES (2, 1.5, 800, 900, 800)`);
+const sc = (s.prepare(SQL_SYNC_SCHED_SINCE).all(600) as { uuid: string; stability: number }[])
+  .sort((a, b) => a.uuid.localeCompare(b.uuid));
+check('排期增量带同步键', sc.length === 2 && sc[0].uuid === 'deck-A/c1' && sc[0].stability === 3.5, JSON.stringify(sc));
+check('旧卡的同步键 = 牌组uuid/它的裸 uuid(与导出的 id 一致)', sc[1].uuid === 'deck-A/legacy-v4', sc[1].uuid);
+check('SQL 与 cardSyncKey 规则一致', cardSyncKey('deck-A', 'deck-A/c1') === 'deck-A/c1' &&
+  cardSyncKey('deck-A', 'legacy-v4') === 'deck-A/legacy-v4');
+check('拆同步键', splitCardSyncKey('deck-A/legacy-v4').join('|') === 'deck-A|legacy-v4');
+const find = (key: string): { card_id: number; updated_at: number } | undefined => {
+  const [d, id] = splitCardSyncKey(key);
+  return s.prepare(SQL_CARD_BY_SYNC_KEY).get(d, key, id) as { card_id: number; updated_at: number } | undefined;
+};
+check('按同步键找新卡', find('deck-A/c1')?.card_id === 1 && find('deck-A/c1')?.updated_at === 700);
+check('按同步键找旧卡(另一台设备传来的是带前缀的键)', find('deck-A/legacy-v4')?.card_id === 2);
+check('别的牌组的同名键找不到', find('deck-B/c1') === undefined);
 s.prepare(SQL_SET_SCHED_UPDATED).run(1234, 1);
-check('设置排期时刻', (s.prepare(SQL_SYNC_SCHED_BY_UUID).get('deck-A/c1') as { updated_at: number }).updated_at === 1234);
+check('设置排期时刻', find('deck-A/c1')?.updated_at === 1234);
 s.prepare(SQL_PUT_TOMBSTONE).run('card', 'deck-A/c1', 999);
 check('写入云端墓碑、按 uuid 取时刻', (s.prepare(SQL_TOMBSTONE_AT).get('card', 'deck-A/c1') as { deleted_at: number }).deleted_at === 999);
 s.prepare(SQL_DELETE_SCHED_BY_CARD).run(1);
-check('删排期', s.prepare(SQL_SYNC_SCHED_BY_UUID).get('deck-A/c1') === undefined);
+check('删排期后:卡还在、没有排期', find('deck-A/c1')?.card_id === 1 && find('deck-A/c1')?.updated_at === -1);
+s.prepare(SQL_SET_DECK_UPDATED).run(4242, 'deck-A');
+check('牌组时刻设成云端的', (s.prepare(SQL_SYNC_DECK_BY_UUID).get('deck-A') as { updated_at: number }).updated_at === 4242);
+const legacyTomb = freshDb();
+legacyTomb.exec(`INSERT INTO decks (id, name, uuid) VALUES (1, 'A', 'deck-A')`);
+legacyTomb.exec(`INSERT INTO notes (id, deck_id, front, fingerprint, uuid) VALUES (1, 1, 'q', 'f', 'legacy-v4')`);
+legacyTomb.exec(`INSERT INTO cards (id, note_id, uuid) VALUES (1, 1, 'random-card-uuid')`);
+legacyTomb.prepare(SQL_TOMBSTONE_NOTE_CARDS).run(5, 1);
+check('旧卡的墓碑也用同步键', (legacyTomb.prepare(SQL_TOMBSTONES_SINCE).all('card', 0) as { uuid: string }[])[0]?.uuid === 'deck-A/legacy-v4');
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`);
 process.exit(fail === 0 ? 0 : 1);

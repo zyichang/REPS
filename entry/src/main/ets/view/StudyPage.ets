@@ -20,6 +20,8 @@ import {
 import { L, LANG_ZH, fmt, gradeLabels, phaseLabels } from '../i18n/Strings';
 import { formatInterval, newCardState, schedule } from '../srs/Srs';
 import { MAX_READ } from './Layout';
+import { syncNow } from '../data/SyncService';
+import { common as abilityCommon } from '@kit.AbilityKit';
 
 /** 平板上四个评级按钮的总宽度上限 */
 const MAX_GRADES: number = 560;
@@ -308,6 +310,8 @@ export struct StudyPage {
     this.cancelAutoNext();
     // 离开这个卡组:让牌组列表等页面按新进度重算
     appStore().bump();
+    // 学完一轮:把这一轮的进度传上去(不等结果,失败下次再来)
+    syncNow(this.getUIContext().getHostContext() as abilityCommon.UIAbilityContext, '学完一轮', true);
     // **必须解除沉浸**,否则切走之后标签栏再也不出现
     this.immersive = false;
   }

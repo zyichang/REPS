@@ -31,6 +31,7 @@ import {
   SK_AVATAR, SK_NICK, SK_UID, accountConfigured, fetchProfile, maskUid, signInHuawei, signOut,
 } from '../data/Account';
 import { common } from '@kit.AbilityKit';
+import { SK_SYNC_AT, SK_SYNC_ERROR, SK_SYNC_RUNNING, loadSyncStatus, syncNow } from '../data/SyncService';
 import { BusinessError } from '@kit.BasicServicesKit';
 
 /** 根页面显示哪一层。0 是菜单本身 */
@@ -89,6 +90,9 @@ export struct ProfilePage {
   @StorageLink(SK_UID) uid: string = '';
   @StorageLink(SK_NICK) nick: string = '';
   @StorageLink(SK_AVATAR) avatar: string = '';
+  @StorageLink(SK_SYNC_AT) syncAt: number = 0;
+  @StorageLink(SK_SYNC_ERROR) syncError: string = '';
+  @StorageLink(SK_SYNC_RUNNING) syncRunning: boolean = false;
   @State private accountBusy: boolean = false;
   @State private accountMsg: string = '';
 
@@ -158,7 +162,10 @@ export struct ProfilePage {
     this.accountBusy = true;
     this.accountMsg = '';
     try {
-      await signInHuawei();
+      const uid: string = await signInHuawei();
+      // 登录后马上同步一轮:新设备拉下牌组和进度,老设备把已有数据传上去
+      loadSyncStatus(uid);
+      syncNow(this.getUIContext().getHostContext() as common.UIAbilityContext, '登录', true);
     } catch (e) {
       const be = e as BusinessError;
       // 用户自己取消不算错误,什么都不说
@@ -600,6 +607,17 @@ export struct ProfilePage {
     })
   }
 
+  /** 「上次同步 10-25 23:40」/「还没有同步过」 */
+  private syncLine(): string {
+    if (this.syncAt <= 0) {
+      return L(this.lang).accountSyncNever;
+    }
+    const d = new Date(this.syncAt);
+    const pad = (n: number): string => (n < 10 ? `0${n}` : `${n}`);
+    return fmt(L(this.lang).accountSyncLast,
+      `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`);
+  }
+
   /** 昵称;没授权过就是「华为账号用户」 */
   private displayName(): string {
     return this.nick.length > 0 ? this.nick : L(this.lang).accountDefaultName;
@@ -646,9 +664,25 @@ export struct ProfilePage {
       .width('100%').padding({ top: 18, bottom: 18 }).borderRadius(12).backgroundColor('#FAFAFC')
 
       // ---- 同步 ----
-      Column({ space: 4 }) {
-        Text(L(this.lang).accountSyncTitle).fontSize(15).fontWeight(FontWeight.Medium).width('100%')
-        Text(L(this.lang).accountSyncHint).fontSize(11).fontColor('#8A8A8E').width('100%')
+      Column({ space: 6 }) {
+        Row() {
+          Column({ space: 3 }) {
+            Text(L(this.lang).accountSyncTitle).fontSize(15).fontWeight(FontWeight.Medium)
+            Text(this.syncLine()).fontSize(11).fontColor('#8A8A8E')
+          }
+          .alignItems(HorizontalAlign.Start).layoutWeight(1)
+          Button(this.syncRunning ? L(this.lang).accountSyncRunning : L(this.lang).accountSyncNow)
+            .height(32).fontSize(13).fontColor('#2563EB').backgroundColor('#EAF1FE')
+            .enabled(!this.syncRunning)
+            .onClick(() => {
+              syncNow(this.getUIContext().getHostContext() as common.UIAbilityContext, '手动', true);
+            })
+        }
+        .width('100%')
+        if (this.syncError.length > 0) {
+          Text(fmt(L(this.lang).accountSyncError, this.syncError)).fontSize(11).fontColor('#E5544B').width('100%')
+        }
+        Text(L(this.lang).accountSyncHint).fontSize(11).fontColor('#B0B7C3').width('100%')
       }
       .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
 

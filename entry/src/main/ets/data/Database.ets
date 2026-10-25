@@ -42,7 +42,10 @@ import {
   SQL_EXPORT_DECK, SQL_EXPORT_NOTES, parseTagsColumn,
   DailyStatRow, META_DEVICE_ID, SQL_META_VALUE, SQL_REMOTE_DAY_STATS, SQL_UPSERT_REMOTE_DAY_STAT,
   mergeDayStats, SQL_TOMBSTONE_DECK, SQL_TOMBSTONE_DECK_CARDS, SQL_TOMBSTONE_DECK_SCHED,
-  SQL_TOMBSTONE_NOTE_CARDS,
+  SQL_TOMBSTONE_NOTE_CARDS, SQL_SYNC_CHECKINS_SINCE, SQL_SYNC_CHECKIN_TS, SQL_SYNC_DAYS_SINCE,
+  SQL_SYNC_DECKS_SINCE, SQL_SYNC_DECK_BY_UUID, SQL_SET_DECK_UPDATED, SQL_TOMBSTONES_SINCE, SQL_TOMBSTONE_AT,
+  SQL_PUT_TOMBSTONE, SQL_DROP_TOMBSTONE, SQL_SYNC_SCHED_SINCE, SQL_CARD_BY_SYNC_KEY, SQL_SET_SCHED_UPDATED,
+  SQL_DELETE_SCHED_BY_CARD, splitCardSyncKey,
 } from './Schema';
 import { DeckMeta, ParsedCard, ParsedDeck, emptyMeta } from './Quizify';
 import { ExportCard, ExportDeck, exportYaml } from './YamlExport';
@@ -58,6 +61,34 @@ export interface StoreResult {
   updated: number;
   /** 牌组里有、这次文件里没有的张数(没有删除,只提示) */
   missing: number;
+}
+
+/** 同步用的几种本地行 */
+export interface SyncCheckinRow {
+  day: number;
+  ts: number;
+}
+export interface SyncDayRow {
+  day: number;
+  reps: number;
+  ms: number;
+  /** 这天最后一条流水的时刻 */
+  last: number;
+}
+export interface SyncDeckRow {
+  uuid: string;
+  name: string;
+  updatedAt: number;
+}
+export interface SyncTombstone {
+  uuid: string;
+  deletedAt: number;
+}
+export interface SyncSchedRow {
+  /** 同步键(Schema.cardSyncKey) */
+  key: string;
+  updatedAt: number;
+  row: SchedulingRow;
 }
 
 /** 一副牌组的本地 id 与固定身份 */
@@ -1076,5 +1107,179 @@ export class Database {
       rs.close();
     }
     return out;
+  }
+
+  // ------------------------------------------------------------ 同步的本地一侧(Task 12,SyncLocal.ets 调用)
+  // 每个方法只包一条 Schema 里的 SQL(桌面测试 dailystat_test 第 6、7 节逐条执行过)
+
+  metaString(key: string): string {
+    const rs = this.db().querySqlSync(SQL_META_VALUE, [key]);
+    try {
+      return rs.goToFirstRow() ? rs.getString(rs.getColumnIndex('value')) : '';
+    } finally {
+      rs.close();
+    }
+  }
+
+  setMetaString(key: string, value: string): void {
+    this.db().executeSync(SQL_META_SET, [key, value] as Array<relationalStore.ValueType>);
+  }
+
+  syncCheckinsSince(since: number): SyncCheckinRow[] {
+    const rs = this.db().querySqlSync(SQL_SYNC_CHECKINS_SINCE, [since]);
+    const out: SyncCheckinRow[] = [];
+    try {
+      while (rs.goToNextRow()) {
+        out.push({ day: rs.getLong(rs.getColumnIndex('day')), ts: rs.getLong(rs.getColumnIndex('ts')) });
+      }
+    } finally {
+      rs.close();
+    }
+    return out;
+  }
+
+  /** 这一天的打卡时刻;没打卡为 -1 */
+  checkinTs(day: number): number {
+    const rs = this.db().querySqlSync(SQL_SYNC_CHECKIN_TS, [day]);
+    try {
+      return rs.goToFirstRow() ? rs.getLong(rs.getColumnIndex('ts')) : -1;
+    } finally {
+      rs.close();
+    }
+  }
+
+  syncDaysSince(anchor: number, since: number): SyncDayRow[] {
+    const rs = this.db().querySqlSync(SQL_SYNC_DAYS_SINCE, [anchor, since]);
+    const out: SyncDayRow[] = [];
+    try {
+      while (rs.goToNextRow()) {
+        out.push({
+          day: rs.getLong(rs.getColumnIndex('day')), reps: rs.getLong(rs.getColumnIndex('reps')),
+          ms: rs.getLong(rs.getColumnIndex('ms')), last: rs.getLong(rs.getColumnIndex('last')),
+        });
+      }
+    } finally {
+      rs.close();
+    }
+    return out;
+  }
+
+  syncDecksSince(since: number): SyncDeckRow[] {
+    const rs = this.db().querySqlSync(SQL_SYNC_DECKS_SINCE, [since]);
+    const out: SyncDeckRow[] = [];
+    try {
+      while (rs.goToNextRow()) {
+        out.push({
+          uuid: rs.getString(rs.getColumnIndex('uuid')), name: rs.getString(rs.getColumnIndex('name')),
+          updatedAt: rs.getLong(rs.getColumnIndex('updated_at')),
+        });
+      }
+    } finally {
+      rs.close();
+    }
+    return out;
+  }
+
+  /** 按 uuid 找本机牌组:[id, updated_at];没有返回 [0, -1] */
+  deckByUuid(uuid: string): number[] {
+    const rs = this.db().querySqlSync(SQL_SYNC_DECK_BY_UUID, [uuid]);
+    try {
+      return rs.goToFirstRow()
+        ? [rs.getLong(rs.getColumnIndex('id')), rs.getLong(rs.getColumnIndex('updated_at'))] : [0, -1];
+    } finally {
+      rs.close();
+    }
+  }
+
+  setDeckUpdated(uuid: string, at: number): void {
+    this.db().executeSync(SQL_SET_DECK_UPDATED, [at, uuid] as Array<relationalStore.ValueType>);
+  }
+
+  tombstonesSince(kind: string, since: number): SyncTombstone[] {
+    const rs = this.db().querySqlSync(SQL_TOMBSTONES_SINCE, [kind, since]);
+    const out: SyncTombstone[] = [];
+    try {
+      while (rs.goToNextRow()) {
+        out.push({ uuid: rs.getString(rs.getColumnIndex('uuid')), deletedAt: rs.getLong(rs.getColumnIndex('deleted_at')) });
+      }
+    } finally {
+      rs.close();
+    }
+    return out;
+  }
+
+  /** 墓碑时刻;没有为 -1 */
+  tombstoneAt(kind: string, uuid: string): number {
+    const rs = this.db().querySqlSync(SQL_TOMBSTONE_AT, [kind, uuid]);
+    try {
+      return rs.goToFirstRow() ? rs.getLong(rs.getColumnIndex('deleted_at')) : -1;
+    } finally {
+      rs.close();
+    }
+  }
+
+  putTombstone(kind: string, uuid: string, at: number): void {
+    this.db().executeSync(SQL_PUT_TOMBSTONE, [kind, uuid, at] as Array<relationalStore.ValueType>);
+  }
+
+  dropTombstone(kind: string, uuid: string): void {
+    this.db().executeSync(SQL_DROP_TOMBSTONE, [kind, uuid] as Array<relationalStore.ValueType>);
+  }
+
+  /** 本机排期 updated_at > since 的,带同步键 */
+  syncSchedSince(since: number): SyncSchedRow[] {
+    const rs = this.db().querySqlSync(SQL_SYNC_SCHED_SINCE, [since]);
+    const out: SyncSchedRow[] = [];
+    try {
+      while (rs.goToNextRow()) {
+        out.push({
+          key: rs.getString(rs.getColumnIndex('uuid')),
+          updatedAt: rs.getLong(rs.getColumnIndex('updated_at')),
+          row: {
+            card_id: rs.getLong(rs.getColumnIndex('card_id')),
+            stability: rs.getDouble(rs.getColumnIndex('stability')),
+            difficulty: rs.getDouble(rs.getColumnIndex('difficulty')),
+            reps: rs.getLong(rs.getColumnIndex('reps')),
+            lapses: rs.getLong(rs.getColumnIndex('lapses')),
+            streak: rs.getLong(rs.getColumnIndex('streak')),
+            last_review: rs.getLong(rs.getColumnIndex('last_review')),
+            due: rs.getLong(rs.getColumnIndex('due')),
+            phase: rs.getLong(rs.getColumnIndex('phase')),
+            step: rs.getLong(rs.getColumnIndex('step')),
+            first_seen: rs.getLong(rs.getColumnIndex('first_seen')),
+          },
+        });
+      }
+    } finally {
+      rs.close();
+    }
+    return out;
+  }
+
+  /** 按同步键找本机的卡:[card_id, 排期 updated_at(没有排期 -1)];找不到返回 [0, -1] */
+  cardBySyncKey(key: string): number[] {
+    const parts: string[] = splitCardSyncKey(key);
+    const rs = this.db().querySqlSync(SQL_CARD_BY_SYNC_KEY, [parts[0], key, parts[1]]);
+    try {
+      return rs.goToFirstRow()
+        ? [rs.getLong(rs.getColumnIndex('card_id')), rs.getLong(rs.getColumnIndex('updated_at'))] : [0, -1];
+    } finally {
+      rs.close();
+    }
+  }
+
+  /** 写入云端来的排期,updated_at 用云端那条的 */
+  applySchedRow(cardId: number, row: SchedulingRow, updatedAt: number): void {
+    const r: SchedulingRow = {
+      card_id: cardId, stability: row.stability, difficulty: row.difficulty, reps: row.reps, lapses: row.lapses,
+      streak: row.streak, last_review: row.last_review, due: row.due, phase: row.phase, step: row.step,
+      first_seen: row.first_seen,
+    };
+    this.db().executeSync(SQL_UPSERT_SCHEDULING, schedulingValues(r) as Array<relationalStore.ValueType>);
+    this.db().executeSync(SQL_SET_SCHED_UPDATED, [updatedAt, cardId] as Array<relationalStore.ValueType>);
+  }
+
+  deleteSchedByCard(cardId: number): void {
+    this.db().executeSync(SQL_DELETE_SCHED_BY_CARD, [cardId] as Array<relationalStore.ValueType>);
   }
 }
