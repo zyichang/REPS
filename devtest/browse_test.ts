@@ -7,7 +7,7 @@
  *   3. 中文子串能搜到(SQLite 的 LIKE 对非 ASCII 只做精确匹配,子串本身没问题)
  */
 import { DatabaseSync } from 'node:sqlite';
-import { DDL, SQL_BROWSE, SQL_BROWSE_COUNT, browseArgs, browseCountArgs, escapeLike } from './Schema';
+import { DDL, SQL_BROWSE, SQL_BROWSE_COUNT, SQL_BROWSE_ONE, browseArgs, browseCountArgs, escapeLike } from './Schema';
 
 let pass = 0;
 let fail = 0;
@@ -110,6 +110,13 @@ for (const [deck, text] of [[0, ''], [1, ''], [0, 'bulk'], [2, 'bulk']] as Array
 }
 check('页大小 <= 0 时退回 50', (browseArgs(0, '', 0, 2)[6] as number) === 50
   && (browseArgs(0, '', 0, 2)[7] as number) === 100);
+
+// 按卡片 id 取一行(编辑保存后刷新预览):列与列表一致,卡不在了取不到
+const one = db.prepare(SQL_BROWSE_ONE).get(6) as unknown as Row & { title: string } | undefined;
+const fromList = (db.prepare(SQL_BROWSE).all(...browseArgs(0, 'apple', 10, 0)) as unknown as Row[])[0];
+check('SQL_BROWSE_ONE 取到同一张卡、同样的列', one !== undefined && one.card_id === 6
+  && one.front === fromList.front && one.deck_name === 'Words' && one.title === '水果');
+check('SQL_BROWSE_ONE 卡不存在时没有结果', db.prepare(SQL_BROWSE_ONE).get(999) === undefined);
 
 db.close();
 console.log(`\n===== 结果: ${pass} 通过 / ${fail} 失败 =====`);

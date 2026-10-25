@@ -1152,6 +1152,17 @@ export const SQL_BROWSE: string =
     ORDER BY d.name, n.id, c.ordinal, c.id
     LIMIT ? OFFSET ?`;
 
+/** 浏览器的一行,按卡片 id 取(编辑保存后刷新预览用)。列与 SQL_BROWSE 相同 */
+export const SQL_BROWSE_ONE: string =
+  `SELECT c.id AS card_id, n.id AS note_id, n.deck_id, d.name AS deck_name,
+          n.type, n.title, n.front, n.back,
+          COALESCE(s.due, 0) AS due, COALESCE(s.reps, 0) AS reps
+     FROM cards c
+     JOIN notes n ON n.id = c.note_id
+     JOIN decks d ON d.id = n.deck_id
+     LEFT JOIN scheduling s ON s.card_id = c.id
+    WHERE c.id = ?`;
+
 /** 与 SQL_BROWSE 同一个过滤条件下的总数(列表上方的「N 张」)。列名必须叫 n */
 export const SQL_BROWSE_COUNT: string =
   `SELECT COUNT(*) AS n

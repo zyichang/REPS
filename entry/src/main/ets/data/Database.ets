@@ -17,7 +17,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { CardState, NoteType, ReviewLog } from '../model/Models';
 import {
   BrowseRow, CardBrief, DDL, META_BACKFILL_CHECKINS, MIGRATE_BACKFILL_CHECKINS, SQL_CHECKIN_DAYS,
-  SQL_INSERT_CHECKIN, SQL_IS_CHECKED_IN, SQL_META_GET, SQL_META_SET, dayAnchor, DayStat, SQL_BROWSE, SQL_BROWSE_COUNT, browseArgs, browseCountArgs, DeckCountRow, DeckCounts, DeckRow, LogPoint, SQL_DECK_COUNTS,
+  SQL_INSERT_CHECKIN, SQL_IS_CHECKED_IN, SQL_META_GET, SQL_META_SET, dayAnchor, DayStat, SQL_BROWSE, SQL_BROWSE_COUNT, SQL_BROWSE_ONE, browseArgs, browseCountArgs, DeckCountRow, DeckCounts, DeckRow, LogPoint, SQL_DECK_COUNTS,
   applyDeckLimits, dayIndex, dayStart, MIGRATE_FLATTEN_DECKS, ReviewCardRow,
   ReviewedCard, SQL_AHEAD_CARDS, SQL_AHEAD_CARDS_IN_DECK, SQL_COUNT_CARDS,
   SQL_COUNT_CARDS_IN_DECK, SQL_COUNT_DUE, SQL_COUNT_DUE_IN_DECK, SQL_COUNT_NEW,
@@ -105,6 +105,23 @@ function cardHash(c: ParsedCard): string {
 const DOMAIN: number = 0x0A01;
 const TAG: string = 'REPS-DB';
 const DB_NAME: string = 'reps.db';
+
+
+/** 结果集当前行 → BrowseRow(SQL_BROWSE / SQL_BROWSE_ONE 共用) */
+function readBrowseRow(rs: relationalStore.ResultSet): BrowseRow {
+  return {
+    cardId: rs.getLong(rs.getColumnIndex('card_id')),
+    noteId: rs.getLong(rs.getColumnIndex('note_id')),
+    deckId: rs.getLong(rs.getColumnIndex('deck_id')),
+    deckName: rs.getString(rs.getColumnIndex('deck_name')),
+    type: rs.getLong(rs.getColumnIndex('type')),
+    title: rs.getString(rs.getColumnIndex('title')),
+    front: rs.getString(rs.getColumnIndex('front')),
+    back: rs.getString(rs.getColumnIndex('back')),
+    due: rs.getLong(rs.getColumnIndex('due')),
+    reps: rs.getLong(rs.getColumnIndex('reps')),
+  };
+}
 
 export class Database {
   private store: relationalStore.RdbStore | null = null;
@@ -525,23 +542,22 @@ export class Database {
     const out: BrowseRow[] = [];
     try {
       while (rs.goToNextRow()) {
-        out.push({
-          cardId: rs.getLong(rs.getColumnIndex('card_id')),
-          noteId: rs.getLong(rs.getColumnIndex('note_id')),
-          deckId: rs.getLong(rs.getColumnIndex('deck_id')),
-          deckName: rs.getString(rs.getColumnIndex('deck_name')),
-          type: rs.getLong(rs.getColumnIndex('type')),
-          title: rs.getString(rs.getColumnIndex('title')),
-          front: rs.getString(rs.getColumnIndex('front')),
-          back: rs.getString(rs.getColumnIndex('back')),
-          due: rs.getLong(rs.getColumnIndex('due')),
-          reps: rs.getLong(rs.getColumnIndex('reps')),
-        });
+        out.push(readBrowseRow(rs));
       }
     } finally {
       rs.close();
     }
     return out;
+  }
+
+  /** 按卡片 id 取浏览器的一行;卡不在了返回 null */
+  browseRow(cardId: number): BrowseRow | null {
+    const rs = this.db().querySqlSync(SQL_BROWSE_ONE, [cardId]);
+    try {
+      return rs.goToFirstRow() ? readBrowseRow(rs) : null;
+    } finally {
+      rs.close();
+    }
   }
 
   /** 卡组名。卡组是平的,不存在「路径」,一次查询即可 */

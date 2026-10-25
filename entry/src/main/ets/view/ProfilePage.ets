@@ -395,7 +395,8 @@ export struct ProfilePage {
   private entrySummary(section: number): string {
     if (section === Sub.Algo) {
       const i: number = this.algo === 'fsrs' ? 0 : 1;
-      return `${algoLabels(this.lang)[i]} · ${Math.round(this.retention * 100)}%`;
+      // 保持率只属于 FSRS-6:选的是固定阶梯就不带它
+      return i === 0 ? `${algoLabels(this.lang)[i]} · ${Math.round(this.retention * 100)}%` : algoLabels(this.lang)[i];
     }
     if (section === Sub.SetParams) {
       return fmt(L(this.lang).advancedSummary, `${this.newPerDay}`,
@@ -500,12 +501,19 @@ export struct ProfilePage {
   numRow(which: number) {
     Row() {
       Column({ space: 3 }) {
-        Text(which === NumKey.ReviewLimit ? L(this.lang).reviewLimit
-          : which === NumKey.NewPerDay ? L(this.lang).newPerDay
-          : which === NumKey.Retention ? L(this.lang).retention
-          : which === NumKey.BrowsePage ? L(this.lang).browsePage
-          : L(this.lang).aheadCount)
-          .fontSize(15)
+        Row({ space: 6 }) {
+          Text(which === NumKey.ReviewLimit ? L(this.lang).reviewLimit
+            : which === NumKey.NewPerDay ? L(this.lang).newPerDay
+            : which === NumKey.Retention ? L(this.lang).retention
+            : which === NumKey.BrowsePage ? L(this.lang).browsePage
+            : L(this.lang).aheadCount)
+            .fontSize(15)
+          if (which === NumKey.Retention) {
+            // 角标:说明这是 FSRS-6 的设置
+            Text('FSRS-6').fontSize(10).fontColor('#3B82F6').backgroundColor('#EAF1FE')
+              .borderRadius(4).padding({ left: 5, right: 5, top: 1, bottom: 1 })
+          }
+        }
         // 浏览那一行的说明已在节标题下,这里不再重复
         if (which !== NumKey.BrowsePage) {
           Text(which === NumKey.ReviewLimit ? L(this.lang).reviewLimitHint
@@ -801,7 +809,11 @@ export struct ProfilePage {
     .constraintSize({ minHeight: '100%', maxWidth: MAX_COL })
   }
 
-  /** 排期算法子页:引擎二选一 + 目标保持率(它是 FSRS 的参数,归这里) */
+  /**
+   * 排期算法子页:引擎二选一。目标保持率是 FSRS-6 的参数,不和引擎同级:
+   * 只在选中 FSRS-6 时出现,缩进挂在它下面,并带「FSRS-6」角标。
+   * 切到固定阶梯只是藏起来,值照旧保存,切回来还是原来的数。
+   */
   @Builder
   algoBody() {
     Column({ space: 12 }) {
@@ -809,15 +821,18 @@ export struct ProfilePage {
 
       Column({ space: 2 }) {
         this.algoOption(0)
+        if (this.algo === 'fsrs') {
+          Row() {
+            this.numRow(NumKey.Retention)
+          }
+          .width('100%').padding({ left: 12 })
+          .border({ width: { left: 2 }, color: { left: '#D6E4FD' } })
+          .margin({ bottom: 4 })
+        }
         Divider()
         this.algoOption(1)
         Text(L(this.lang).algoHint)
           .fontSize(11).fontColor('#B0B7C3').width('100%').margin({ top: 6 })
-      }
-      .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
-
-      Column({ space: 2 }) {
-        this.numRow(NumKey.Retention)
       }
       .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
     }

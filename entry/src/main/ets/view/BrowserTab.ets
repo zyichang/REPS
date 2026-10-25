@@ -44,12 +44,15 @@ const EMPTY_ROW: BrowseRow = {
 /** 编辑页的入参。noteId 为 0 表示新建 */
 class EditArgs {
   noteId: number = 0;
+  /** 从哪张卡的预览进来的(保存后回到它);新建为 0 */
+  cardId: number = 0;
   deckId: number = 0;
   front: string = '';
   back: string = '';
 
-  constructor(noteId: number, deckId: number, front: string, back: string) {
+  constructor(noteId: number, deckId: number, front: string, back: string, cardId: number = 0) {
     this.noteId = noteId;
+    this.cardId = cardId;
     this.deckId = deckId;
     this.front = front;
     this.back = back;
@@ -480,7 +483,7 @@ struct CardPreviewPage {
           .onClick(() => {
             this.stack?.pushPath({
               name: ROUTE_EDIT,
-              param: new EditArgs(this.row.noteId, this.row.deckId, this.row.front, this.row.back),
+              param: new EditArgs(this.row.noteId, this.row.deckId, this.row.front, this.row.back, this.row.cardId),
             });
           })
       }
@@ -548,10 +551,27 @@ struct CardEditPage {
     return 0;
   }
 
-  /** 存完回到浏览列表(清掉预览那一层,它显示的是旧内容) */
+  /** 新建 / 删除之后回到浏览列表(分栏时右栏由列表自动补上第一张) */
   private finish(): void {
     appStore().bump();
     this.stack?.clear();
+  }
+
+  /**
+   * 改完一张已有的卡:关掉编辑页,底下那层预览换成新内容 —— 还停在这张卡上,
+   * 列表的高亮也不丢。预览页的 row 是入参快照,只能整页替换。
+   */
+  private backToPreview(cardId: number): void {
+    appStore().bump();
+    const st = this.stack;
+    if (st === null) {
+      return;
+    }
+    const row: BrowseRow | null = cardId === 0 ? null : appStore().getDb().browseRow(cardId);
+    st.pop(false);
+    if (row !== null && st.size() > 0 && st.getAllPathName()[st.size() - 1] === ROUTE_PREVIEW) {
+      st.replacePath({ name: ROUTE_PREVIEW, param: row }, false);
+    }
   }
 
   private save(): void {
@@ -577,10 +597,11 @@ struct CardEditPage {
           return;
         }
         db.insertManualCard(this.deckId, name, parsed, now);
+        this.finish();
       } else {
         db.updateNoteText(this.args.noteId, parsed, now);
+        this.backToPreview(this.args.cardId);
       }
-      this.finish();
     } catch (e) {
       this.error = fmt(L(this.lang).saveFailed, `${e}`);
     }
@@ -597,7 +618,9 @@ struct CardEditPage {
 
   build() {
     NavDestination() {
-      Scroll() {
+      // 不放进 Scroll:正面 / 背面两个输入框按 3:2 分掉剩下的高度,拉满整栏。
+      // 内容多了在输入框里面滚
+      Column() {
         Column({ space: 10 }) {
           Row({ space: 8 }) {
             Text(L(this.lang).putInDeck).fontSize(12).fontColor('#8A8A8E')
@@ -616,12 +639,12 @@ struct CardEditPage {
 
           Text(L(this.lang).front).fontSize(12).fontColor('#8A8A8E').width('100%')
           TextArea({ text: this.front, placeholder: L(this.lang).frontPlaceholder })
-            .height(150).fontSize(15)
+            .layoutWeight(3).constraintSize({ minHeight: 120 }).fontSize(15)
             .onChange((v: string) => { this.front = v; })
 
           Text(L(this.lang).back).fontSize(12).fontColor('#8A8A8E').width('100%')
           TextArea({ text: this.back, placeholder: L(this.lang).backPlaceholder })
-            .height(120).fontSize(15)
+            .layoutWeight(2).constraintSize({ minHeight: 96 }).fontSize(15)
             .onChange((v: string) => { this.back = v; })
 
           if (this.error.length > 0) {
@@ -649,9 +672,9 @@ struct CardEditPage {
             }
           }
         }
-        .width('90%').padding({ top: 8, bottom: 24 })
+        .width('90%').height('100%').padding({ top: 8, bottom: 16 })
       }
-      .width('100%').height('100%').align(Alignment.Top)
+      .width('100%').height('100%')
     }
     .title(this.isNew() ? L(this.lang).newCardTitle : L(this.lang).editCardTitle)
     .backgroundColor('#F2F2F7')
