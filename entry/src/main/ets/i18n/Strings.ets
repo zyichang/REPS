@@ -46,6 +46,12 @@ export interface Dict {
   needDeckFirst: string;
   matchCount: string;            // %d
   deckActions: string;
+  /** 牌组菜单:导出成 YAML 并分享 */
+  actExport: string;
+  /** 导出成功:牌组名 */
+  exportedDeck: string;
+  /** 导出失败:原因 */
+  exportFailed: string;
   actClear: string;
   actDelete: string;
 
@@ -170,6 +176,14 @@ export interface Dict {
   importedSkipped: string;
   /** 重导了一个已经全部导入过的文件:牌组名、张数 */
   importNothingNew: string;
+  /** 导入提示里各句之间的分隔 */
+  importSep: string;
+  /** 没有新卡、只有更新:牌组名、更新张数 */
+  importUpdatedOnly: string;
+  /** 重导时内容变了而更新的张数(进度保留) */
+  importUpdatedPart: string;
+  /** 牌组里有、文件里没有的张数(没有删除) */
+  importMissingPart: string;
   /** 手工新建时同一牌组里已有同一个标识键的卡 */
   dupCardKey: string;
   importFailed: string;
@@ -236,12 +250,15 @@ const ZH: Dict = {
   checkInConfirmBody: '今天还有 %d 张待学习、%d 张待复习。仍要打卡吗?打卡后不能撤销。',
   checkInAnyway: '仍要打卡', checkInDone: '今天已打卡',
   checkinCalendar: '打卡统计', monthTitle: '%d 年 %d 月',
-  deckListEmpty: '还没有牌组 —— 导入一个 Markdown 或 YAML 文件就能开始',
+  deckListEmpty: '还没有牌组 —— 导入一个 YAML(或 Markdown)卡组文件就能开始',
   colNew: '新', colLearn: '学习中', colDue: '待复习',
   importDeck: '导入牌组',
   browseTitle: '浏览', searchHint: '搜索正面、背面或标题', noMatch: '没有匹配的卡片',
   dueNow: '已到期', dueOn: '%s 到期', putInDeck: '放进牌组',
   needDeckFirst: '还没有牌组 —— 先在学习页导入一个', matchCount: '%d 张', deckActions: '牌组操作',
+  actExport: '导出并分享(YAML)',
+  exportedDeck: '已导出「%s」。文件里只有卡片内容,没有学习记录',
+  exportFailed: '导出失败:%s',
   actClear: '清空进度(卡片保留)', actDelete: '删除牌组',
 
   appName: '刻意重复',
@@ -310,12 +327,12 @@ const ZH: Dict = {
   browsePageHint: '浏览卡片时先显示这么多张,滑到底再加载下一批。卡多时调小更流畅',
   langChinese: '中文', langEnglish: 'English',
   formatSection: '导入格式',
-  formatValue: 'Quizify Card Markdown v1  ·  YAML 卡组',
-  formatDispatch: '两种都收,按扩展名分派:.md / .markdown 走 Quizify,'
-    + '.yaml / .yml 走 YAML。两条路产出的卡片形状完全一致。',
-  formatMarkdown: 'Markdown:+++ 起一张卡,*** 切正反面,;;; 块是选择题,{{挖空}} 是完形填空。',
-  formatYaml: 'YAML:顶层写 deck 和 cards,每张卡只有 front 和 back;'
-    + '两者必须用引号或 | 块标量。',
+  formatValue: 'REPS Card YAML v1(主格式) ·  Quizify Markdown(兼容)',
+  formatDispatch: '按扩展名分派:.yaml / .yml 走 YAML,.md / .markdown 走 Quizify 兼容导入。'
+    + '导出、分享一律是 YAML。两条路产出的卡片形状完全一致。',
+  formatMarkdown: 'Markdown(兼容):+++ 起一张卡,*** 切正反面,;;; 块是选择题,{{挖空}} 是完形填空。',
+  formatYaml: 'YAML:开头写 reps: 1,再写 deck 和 cards;每张卡有 type(qa / choice / cloze)、'
+    + 'front、back,选择题用 options 列选项、answer 写答案字母。文字必须用引号或 | 块。',
   formatAnki: '与 Anki 的 Quizify Markdown 插件同一套语法,所以卡组可以双向流动。',
   aboutSection: '关于',
   aboutTagline: '一天的学习量是 a set,一次作答是 a rep。',
@@ -335,6 +352,10 @@ const ZH: Dict = {
  readFailed: '读取失败: %s', importedTo: '已导入 %d 张卡到「%s」',
   importedSkipped: '已导入 %d 张卡到「%s」,跳过 %d 张已有的卡',
   importNothingNew: '「%s」里已经有这 %d 张卡了,没有新卡',
+  importSep: ';',
+  importUpdatedOnly: '「%s」:没有新卡,更新了 %d 张卡的内容(学习进度保留)',
+  importUpdatedPart: '更新了 %d 张卡的内容(学习进度保留)',
+  importMissingPart: '文件里少了 %d 张牌组里已有的卡(没有删除)',
   dupCardKey: '这个牌组里已经有标识为「%s」的卡片了,请换一个标题或编号',
   importFailed: '导入失败:%s', 
   clearedProgress: '已清空「%s」的进度,%d 张卡全部变回新卡',
@@ -368,12 +389,15 @@ const EN: Dict = {
   checkInConfirmBody: '%d to learn and %d to review are left today. Check in anyway? A check-in cannot be undone.',
   checkInAnyway: 'Check in anyway', checkInDone: 'Checked in for today',
   checkinCalendar: 'Check-ins', monthTitle: '%d-%d',
-  deckListEmpty: 'No decks yet — import a Markdown or YAML file to start',
+  deckListEmpty: 'No decks yet — import a YAML (or Markdown) deck file to start',
   colNew: 'New', colLearn: 'Learn', colDue: 'Due',
   importDeck: 'Import deck',
   browseTitle: 'Browse', searchHint: 'Search front, back or title', noMatch: 'No matching cards',
   dueNow: 'Due', dueOn: 'Due %s', putInDeck: 'Deck',
   needDeckFirst: 'No decks yet — import one on the Study tab', matchCount: '%d cards', deckActions: 'Deck actions',
+  actExport: 'Export & share (YAML)',
+  exportedDeck: 'Exported “%s”. The file holds only the cards, no study history',
+  exportFailed: 'Export failed: %s',
   actClear: 'Clear progress (keep cards)', actDelete: 'Delete deck',
 
   appName: 'REPS',
@@ -445,13 +469,13 @@ const EN: Dict = {
   browsePageHint: 'The browser shows this many cards first and loads the next batch when you reach the end',
   langChinese: '中文', langEnglish: 'English',
   formatSection: 'Import format',
-  formatValue: 'Quizify Card Markdown v1  ·  YAML decks',
-  formatDispatch: 'Both are accepted, dispatched by extension: .md / .markdown use Quizify, '
-    + '.yaml / .yml use YAML. Both paths produce identical cards.',
-  formatMarkdown: 'Markdown: +++ starts a card, *** splits front from back, '
+  formatValue: 'REPS Card YAML v1 (main)  ·  Quizify Markdown (compatible)',
+  formatDispatch: 'Dispatched by extension: .yaml / .yml use YAML, .md / .markdown use the Quizify '
+    + 'compatibility import. Export and sharing are always YAML. Both paths produce identical cards.',
+  formatMarkdown: 'Markdown (compatible): +++ starts a card, *** splits front from back, '
     + 'a ;;; block is multiple choice, {{blank}} is a cloze.',
-  formatYaml: 'YAML: deck and cards at the top level; each card has only front and back, '
-    + 'both quoted or written as a | block scalar.',
+  formatYaml: 'YAML: start with reps: 1, then deck and cards; each card has type (qa / choice / cloze), '
+    + 'front and back; multiple choice lists options and puts the letters in answer. Text must be quoted or a | block.',
   formatAnki: 'Same syntax as the Quizify Markdown add-on for Anki, so decks flow both ways.',
   aboutSection: 'About',
   aboutTagline: "A day's workload is a set; one answer is a rep.",
@@ -472,6 +496,10 @@ const EN: Dict = {
  readFailed: 'Read failed: %s', importedTo: 'Imported %d cards into “%s”',
   importedSkipped: 'Imported %d cards into “%s”, skipped %d already there',
   importNothingNew: '“%s” already has all %d of these cards; nothing new',
+  importSep: '; ',
+  importUpdatedOnly: '“%s”: no new cards; updated %d cards (progress kept)',
+  importUpdatedPart: 'updated %d cards (progress kept)',
+  importMissingPart: '%d cards in the deck are not in the file (not deleted)',
   dupCardKey: 'This deck already has a card identified as “%s”. Use a different title or number',
   importFailed: 'Import failed: %s', 
   

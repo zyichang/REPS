@@ -24,6 +24,7 @@ import { SK_IMMERSIVE, SK_LANG, SK_TICK, appStore } from '../store/AppStore';
 import { BP_SM, MAX_COL, SIDE_W, SK_BP, isSplit } from './Layout';
 import { ImportIcon } from './ImportIcon';
 import { runImport } from './ImportAction';
+import { runExport } from './ExportAction';
 import { COLOR_DUE, COLOR_LEARN, COLOR_NEW, COLOR_ZERO } from './DeckColors';
 import { StudyPage } from './StudyPage';
 
@@ -248,9 +249,24 @@ export struct StudyTab {
   /** 每行的「⋯」菜单。用 MenuElement 数组,不用已废弃的弹窗 API */
   private actionsFor(i: number): MenuElement[] {
     return [
+      { value: L(this.lang).actExport, action: () => this.onExport(i) },
       { value: L(this.lang).actClear, action: () => this.askConfirm(i, 1) },
       { value: L(this.lang).actDelete, action: () => this.askConfirm(i, 2) },
     ];
+  }
+
+  /** 「⋯ → 导出」:写成 YAML 文件,弹系统分享面板 */
+  private async onExport(i: number): Promise<void> {
+    if (this.busy || i < 0 || i >= this.decks.length) {
+      return;
+    }
+    this.busy = true;
+    try {
+      const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      this.status = await runExport(ctx, this.decks[i].id, this.lang);
+    } finally {
+      this.busy = false;
+    }
   }
 
   private askConfirm(i: number, kind: number): void {

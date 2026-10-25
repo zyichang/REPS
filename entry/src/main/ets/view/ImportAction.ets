@@ -7,7 +7,7 @@
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { ImportResult, importFromPicker } from '../data/Importer';
-import { L, fmt } from '../i18n/Strings';
+import { Dict, L, fmt } from '../i18n/Strings';
 import { appStore } from '../store/AppStore';
 
 const DOMAIN: number = 0x0A01;
@@ -18,13 +18,27 @@ export async function runImport(ctx: common.UIAbilityContext, lang: string): Pro
     const r: ImportResult = await importFromPicker(ctx, appStore().getDb());
     if (r.ok) {
       appStore().bump();
-      // 重导时旧卡一律跳过(指纹已在库里),所以要告诉用户跳过了多少
-      if (r.cardsAdded === 0 && r.cardsSkipped > 0) {
-        return fmt(L(lang).importNothingNew, r.deck, r.cardsSkipped);
+      // 主句:导入了几张 / 没有新卡;再按需接上「更新了几张」「文件里少了几张」
+      const d: Dict = L(lang);
+      let msg: string;
+      let updatedSaid = false;
+      if (r.cardsAdded === 0 && r.cardsUpdated === 0 && r.cardsSkipped > 0) {
+        msg = fmt(d.importNothingNew, r.deck, r.cardsSkipped);
+      } else if (r.cardsAdded === 0 && r.cardsUpdated > 0) {
+        msg = fmt(d.importUpdatedOnly, r.deck, r.cardsUpdated);
+        updatedSaid = true;
+      } else if (r.cardsSkipped > 0) {
+        msg = fmt(d.importedSkipped, r.cardsAdded, r.deck, r.cardsSkipped);
+      } else {
+        msg = fmt(d.importedTo, r.cardsAdded, r.deck);
       }
-      return r.cardsSkipped > 0
-        ? fmt(L(lang).importedSkipped, r.cardsAdded, r.deck, r.cardsSkipped)
-        : fmt(L(lang).importedTo, r.cardsAdded, r.deck);
+      if (r.cardsUpdated > 0 && !updatedSaid) {
+        msg += d.importSep + fmt(d.importUpdatedPart, r.cardsUpdated);
+      }
+      if (r.cardsMissing > 0) {
+        msg += d.importSep + fmt(d.importMissingPart, r.cardsMissing);
+      }
+      return msg;
     }
     return r.cancelled ? '' : fmt(L(lang).importFailed, r.error);
   } catch (e) {

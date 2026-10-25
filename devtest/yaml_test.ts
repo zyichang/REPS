@@ -5,9 +5,14 @@
  * YAML 的坑几乎全是「静默解析成了别的东西」,所以裸标量、Tab 缩进、
  * 未知字段这些都必须硬失败并给出正确行号。
  */
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { NoteType } from './Models';
 import { ParsedDeck, QuizifyError } from './Quizify';
 import { parseYamlDeck } from './Yaml';
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 let pass = 0;
 let fail = 0;
@@ -209,6 +214,121 @@ check("单引号里的 '' 还原成一个撇号",
 
 const crlf: ParsedDeck = parseYamlDeck("deck: 测试\r\ncards:\r\n  - front: \"甲\"\r\n    back: \"乙\"\r\n");
 check('CRLF 换行也认', crlf.cards.length === 1, `${crlf.cards.length}`);
+
+// ================================================================ 7. REPS Card YAML v1(ADR-0007)
+console.log('\n=== 7. v1:ADR-0007 的示例文件 ===');
+
+const ex: ParsedDeck = parseYamlDeck(readFileSync(join(here, '..', 'testdata', 'format-example.yaml'), 'utf8'));
+check('format = 1', ex.format === 1, `${ex.format}`);
+check('deck', ex.deck === '格式示例', ex.deck);
+check('tags', ex.tags.join(',') === '示例', ex.tags.join(','));
+check('meta.id', ex.meta.id === '3b8e1f0a-2c4d-4e6f-8a1b-9c0d1e2f3a4b', ex.meta.id);
+check('meta.version 是数字 1', ex.meta.version === 1, `${ex.meta.version}`);
+check('meta.author', ex.meta.author === 'zyichang', ex.meta.author);
+check('meta.language / license', ex.meta.language === 'zh-CN' && ex.meta.license === 'CC-BY-4.0');
+check('meta.description', ex.meta.description === '格式示例', ex.meta.description);
+check('meta.generated_by', ex.meta.generatedBy === 'manual', ex.meta.generatedBy);
+check('四张卡', ex.cards.length === 4, `${ex.cards.length}`);
+
+const qa = ex.cards[0];
+check('卡 1:id', qa.id === 'ex-qa-1', qa.id);
+check('卡 1:问答', qa.type === NoteType.QA, `${qa.type}`);
+check('卡 1:title', qa.title === '机会成本', qa.title);
+check('卡 1:背面(块标量去掉末尾空行)', qa.back === '为了得到某种东西所必须放弃的东西。', JSON.stringify(qa.back));
+check('卡 1:有 id 时标识键就是 id', qa.key === 'ex-qa-1', qa.key);
+
+const ch = ex.cards[1];
+check('卡 2:选择题', ch.type === NoteType.Choice, `${ch.type}`);
+check('卡 2:四个选项按位置编号', ch.options.join('|') === 'A. 单调函数|B. 奇函数|C. 周期函数|D. 无界函数',
+  ch.options.join('|'));
+check('卡 2:单选答案 D', ch.answer === 'D', ch.answer);
+check('卡 2:正面不含答案', !ch.front.includes('无界函数') && ch.front.includes('dfrac'), ch.front);
+check('卡 2:没写 title 时用正面首行', ch.title.startsWith('$f(x)'), ch.title);
+
+const multi = ex.cards[2];
+check('卡 3:多行选项列表', multi.options.length === 4 && multi.options[2] === 'C. 队列', multi.options.join('|'));
+check('卡 3:多选答案 AC', multi.answer === 'AC', multi.answer);
+check('卡 3:没有 back 也行(选择题)', multi.back === '', JSON.stringify(multi.back));
+
+const cz = ex.cards[3];
+check('卡 4:挖空', cz.type === NoteType.Cloze, `${cz.type}`);
+check('卡 4:三个空', cz.clozeCount === 3, `${cz.clozeCount}`);
+check('卡 4:解析', cz.back.includes('单入口单出口'), cz.back);
+
+console.log('\n=== 8. v1:字段细节 ===');
+
+const v1 = (body: string): ParsedDeck => parseYamlDeck(`reps: 1\ndeck: 测试\ncards:\n${body}`);
+
+const dflt = v1(`  - front: "甲"\n    back: "乙"\n`);
+check('不写 type 就是问答', dflt.cards[0].type === NoteType.QA, `${dflt.cards[0].type}`);
+check('不写 id 就是空串(导入时再生成)', dflt.cards[0].id === '', dflt.cards[0].id);
+check('没有 meta 也能导入', dflt.meta.id === '' && dflt.meta.version === 0);
+
+const lower = v1(`  - type: choice\n    front: "甲"\n    options: ["x", "y", "z"]\n    answer: b\n`);
+check('答案字母大小写不敏感', lower.cards[0].answer === 'B', lower.cards[0].answer);
+
+const unsorted = v1(`  - type: choice\n    front: "甲"\n    options: ["x", "y", "z"]\n    answer: [c, A]\n`);
+check('多选答案排序、转大写', unsorted.cards[0].answer === 'AC', unsorted.cards[0].answer);
+
+const comma = v1(`  - type: choice\n    front: "甲"\n    options: ["1, 2", 'it''s', "3"]\n    answer: A\n`);
+check('引号里的逗号不切选项', comma.cards[0].options.length === 3 && comma.cards[0].options[0] === 'A. 1, 2',
+  comma.cards[0].options.join('|'));
+check('单引号选项', comma.cards[0].options[1] === "B. it's", comma.cards[0].options[1]);
+
+const tagged = v1(`  - front: "甲"\n    back: "乙"\n    tags: [第一章, 重点]\n`);
+check('卡片 tags', tagged.cards[0].tags.join(',') === '第一章,重点', tagged.cards[0].tags.join(','));
+
+const anyOrder = v1(`  - back: "乙"\n    front: "甲"\n    id: z-9\n`);
+check('字段顺序随意', anyOrder.cards[0].front === '甲' && anyOrder.cards[0].id === 'z-9');
+
+const titled = v1(`  - title: "基础选择 (1) 一个算法应该是"\n    front: "甲"\n    back: "乙"\n`);
+check('没有 id 时,标识键按标题取(与 Quizify 一致)', titled.cards[0].key === '基础选择 (1)', titled.cards[0].key);
+
+const colon = v1(`  - front: "下列说法正确的是: 甲"\n    back: "no"\n`);
+check('引号里的冒号保留', colon.cards[0].front === '下列说法正确的是: 甲', colon.cards[0].front);
+check('引号里的 no 是文字不是布尔', colon.cards[0].back === 'no', colon.cards[0].back);
+
+console.log('\n=== 9. v1:该报错的必须报错,行号要准 ===');
+
+const H = 'reps: 1\ndeck: 测试\ncards:\n';   // 第 4 行起是卡片
+
+expectError('答案字母超出选项', H +
+  `  - type: choice\n    front: "甲"\n    options: ["a", "b", "c", "d"]\n    answer: E\n`, 7, 'E');
+expectError('选项少于 2 个', H +
+  `  - type: choice\n    front: "甲"\n    options: ["a"]\n    answer: A\n`, 6, '至少 2');
+expectError('选择题缺 options', H + `  - type: choice\n    front: "甲"\n    answer: A\n`, 4, 'options');
+expectError('选择题缺 answer', H + `  - type: choice\n    front: "甲"\n    options: ["a", "b"]\n`, 4, 'answer');
+expectError('问答题写了 options', H + `  - front: "甲"\n    back: "乙"\n    options: ["a", "b"]\n`, 6, 'choice');
+expectError('问答题写了 answer', H + `  - front: "甲"\n    back: "乙"\n    answer: A\n`, 6, 'choice');
+expectError('问答题缺 back', H + `  - front: "甲"\n`, 4, 'back');
+expectError('挖空题没有 {{}}', H + `  - type: cloze\n    front: "甲"\n`, 4, '{{');
+expectError('不认识的题型', H + `  - type: essay\n    front: "甲"\n    back: "乙"\n`, 4, 'essay');
+expectError('id 重复', H +
+  `  - id: a1\n    front: "甲"\n    back: "乙"\n  - id: a1\n    front: "丙"\n    back: "丁"\n`, 7, 'a1');
+expectError('id 只能是字母数字和 -', H + `  - id: "a b"\n    front: "甲"\n    back: "乙"\n`, 4, 'id');
+expectError('v1 卡片的未知字段', H + `  - front: "甲"\n    back: "乙"\n    page: 12\n`, 6, 'page');
+expectError('同一张卡字段重复', H + `  - front: "甲"\n    front: "丙"\n    back: "乙"\n`, 5, 'front');
+expectError('行内选项没加引号', H + `  - type: choice\n    front: "甲"\n    options: [a, "b"]\n    answer: A\n`, 6, '引号');
+expectError('多行选项没加引号', H +
+  `  - type: choice\n    front: "甲"\n    options:\n      - "a"\n      - b: c\n    answer: A\n`, 8, '引号');
+expectError('v1 里 title 也要引号', H + `  - title: 标题\n    front: "甲"\n    back: "乙"\n`, 4, '引号');
+expectError('v1 不再支持 ;;; 选择题块', H +
+  `  - front: |\n      题干\n      ;;;\n      A. x\n      ;;;A\n    back: "乙"\n`, 4, 'options');
+expectError('不支持的格式版本', `reps: 2\ndeck: 测试\ncards:\n  - front: "甲"\n    back: "乙"\n`, 1, '2');
+expectError('meta 的未知字段', `reps: 1\nmeta:\n  colour: red\ndeck: 测试\ncards:\n  - front: "甲"\n    back: "乙"\n`,
+  3, 'colour');
+expectError('meta.version 必须是整数', `reps: 1\nmeta:\n  version: v2\ndeck: 测试\ncards:\n  - front: "甲"\n    back: "乙"\n`,
+  3, 'version');
+expectError('meta.description 要引号', `reps: 1\nmeta:\n  description: 简介: 好\ndeck: 测试\ncards:\n  - front: "甲"\n    back: "乙"\n`,
+  3, '引号');
+expectError('没有 reps 却写了 v1 字段(旧格式只认 front/back)',
+  `deck: 测试\ncards:\n  - front: "甲"\n    back: "乙"\n    type: qa\n`, 5, 'reps: 1');
+
+console.log('\n=== 10. 旧格式 math1000.yml 照常导入 ===');
+const m1000: ParsedDeck = parseYamlDeck(readFileSync(join(here, '..', 'testdata', 'math1000.yml'), 'utf8'));
+check('math1000.yml 能导入', m1000.cards.length > 200, `${m1000.cards.length}`);
+check('旧格式 format 记为 0(没有 reps)', m1000.format === 0, `${m1000.format}`);
+check('旧格式里的 ;;; 选择题仍然识别', m1000.cards.some((c) => c.type === NoteType.Choice));
 
 console.log(`\n===== 结果: ${pass} 通过 / ${fail} 失败 =====`);
 if (fail > 0) {

@@ -318,6 +318,14 @@ export const SQL_UPSERT_SCHEDULING: string =
   `INSERT OR REPLACE INTO scheduling (${SCHED_COLUMNS.join(', ')}) ` +
   `VALUES (${SCHED_COLUMNS.map(() => '?').join(', ')})`;
 
+/**
+ * 写完排期后打同步时间戳(schema v2)。INSERT OR REPLACE 会把整行换掉,
+ * updated_at 不在 SCHED_COLUMNS 里所以会回到默认 0 —— 必须紧跟着这一句。
+ * 用 last_review 而不是墙钟:它就是这次改动发生的时刻。
+ */
+export const SQL_TOUCH_SCHEDULING: string =
+  `UPDATE scheduling SET updated_at = last_review WHERE card_id = ?`;
+
 export const SQL_SELECT_SCHEDULING: string =
   `SELECT ${SCHED_COLUMNS.join(', ')} FROM scheduling WHERE card_id = ?`;
 
@@ -414,6 +422,97 @@ export const MIGRATE_FLATTEN_DECKS: string[] = [
 
 export const SQL_INSERT_DECK: string =
   `INSERT OR IGNORE INTO decks (name) VALUES (?)`;
+
+/**
+ * 新建牌组之后补上 uuid 与时刻。**只填空的** —— 已有 uuid 是牌组的固定身份,永不覆盖。
+ * 参数:(uuid, now, name)。uuid 由 Database 层用 util.generateRandomUUID 生成。
+ */
+export const SQL_FILL_DECK_UUID: string =
+  `UPDATE decks SET uuid = ?, updated_at = ? WHERE name = ? AND uuid = ''`;
+
+// ---------------------------------------------------------------- 版本化迁移
+
+/**
+ * 当前 schema 版本,记在 SQLite 的 `PRAGMA user_version`(relationalStore 里是 RdbStore.version)。
+ *
+ * 规则:DDL 永远是 v1 基线(`CREATE TABLE IF NOT EXISTS` 对老库无效,所以不在 DDL 里加列);
+ * 之后的每次改表都是 MIGRATIONS 里的一项。老库和新库走同一条路:DDL → 旧的按列迁移 → MIGRATIONS。
+ * v2 之前的迁移(拍平 decks、补 archived、回填打卡)靠「列在不在」判断,保持原样。
+ */
+export const SCHEMA_VERSION: number = 3;
+
+export interface Migration {
+  /** 跑完之后 user_version 设成它 */
+  version: number;
+  /** 按顺序执行,外面包一个事务 */
+  statements: string[];
+}
+
+/** SQLite 里生成 v4 uuid(老牌组补身份用)。每行求值一次 */
+const SQL_RANDOM_UUID: string =
+  `lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
+   substr(lower(hex(randomblob(2))), 2) || '-' ||
+   substr('89ab', 1 + (abs(random()) % 4), 1) || substr(lower(hex(randomblob(2))), 2) || '-' ||
+   lower(hex(randomblob(6)))`;
+
+export const MIGRATIONS: Migration[] = [
+  {
+    // v2(docs/data-model.md):牌组身份、内容哈希、删除标记、标签、排期时间戳
+    version: 2,
+    statements: [
+      `ALTER TABLE decks ADD COLUMN uuid TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE decks ADD COLUMN version INTEGER NOT NULL DEFAULT 0`,
+      // YAML meta 块(作者、许可证、来源…),JSON 文本;导出时原样写回
+      `ALTER TABLE decks ADD COLUMN meta TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE decks ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'`,
+      `ALTER TABLE decks ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0`,
+      // 删除标记(墓碑):0 = 没删。云同步确认之后才真删,否则另一台设备会把它传回来
+      `ALTER TABLE decks ADD COLUMN deleted_at INTEGER NOT NULL DEFAULT 0`,
+      `UPDATE decks SET uuid = ${SQL_RANDOM_UUID} WHERE uuid = ''`,
+      `UPDATE decks SET updated_at = COALESCE(
+         (SELECT MAX(n.updated_at) FROM notes n WHERE n.deck_id = decks.id), 0)`,
+      // 部分唯一索引:刚 INSERT 还没补 uuid 的那一瞬间是 '',不能互相撞
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_decks_uuid ON decks(uuid) WHERE uuid <> ''`,
+
+      // front + back + options + answer 的哈希。'' = 还没算过,Task 4 导入时补
+      `ALTER TABLE notes ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE notes ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'`,
+      `ALTER TABLE notes ADD COLUMN deleted_at INTEGER NOT NULL DEFAULT 0`,
+
+      // 同步只传 updated_at 新于上次同步的行
+      `ALTER TABLE scheduling ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0`,
+      `UPDATE scheduling SET updated_at = last_review WHERE updated_at = 0`,
+    ],
+  },
+  {
+    // v3(ADR-0006 方案 A):**其他设备**的每日汇总在本机的缓存。本机自己的汇总从不存表 ——
+    // 它永远从 review_log 现算(SQL_DAY_STATS),否则就是同一个数的第二个口径(ADR-0005)。
+    version: 3,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS remote_day_stats (
+         device_id TEXT    NOT NULL,
+         day       INTEGER NOT NULL,
+         reps      INTEGER NOT NULL DEFAULT 0,
+         ms        INTEGER NOT NULL DEFAULT 0,
+         PRIMARY KEY (device_id, day)
+       )`,
+      // 删除墓碑(Task 8):本地删牌组 / 删卡照旧是真删,另记一行墓碑交给同步传到其他设备。
+      // 不用 decks/notes.deleted_at 软删除 —— 那要给几十条读查询都加过滤,而墓碑只碰删除和同步两处。
+      `CREATE TABLE IF NOT EXISTS sync_tombstones (
+         kind       TEXT    NOT NULL,
+         uuid       TEXT    NOT NULL,
+         deleted_at INTEGER NOT NULL,
+         PRIMARY KEY (kind, uuid)
+       )`,
+    ],
+  },
+];
+
+/** 从当前版本出发还要跑哪些迁移,按版本升序 */
+export function pendingMigrations(current: number): Migration[] {
+  return MIGRATIONS.filter((m: Migration) => m.version > current)
+    .sort((a: Migration, b: Migration) => a.version - b.version);
+}
 
 export const SQL_SELECT_DECK_ID: string =
   `SELECT id FROM decks WHERE name = ?`;
@@ -796,6 +895,131 @@ export const SQL_DAY_STATS: string =
     GROUP BY day
     ORDER BY day ASC`;
 
+// ---------------------------------------------------------------- 每日汇总投影(Task 7,ADR-0006 方案 A)
+
+/** 云端 daily_stat 的一行:某台设备某一天的作答数与时长 */
+export interface DailyStatRow {
+  deviceId: string;
+  day: number;
+  reps: number;
+  ms: number;
+}
+
+/**
+ * 本机的每日汇总 -> 要上传的 daily_stat 行。只取 sinceDay 及以后的天:
+ * review_log 只增不删、新流水的 ts 总是「现在」,所以上次同步那天之前的汇总不会再变,不必重传。
+ * sinceDay 传 -Infinity 就是全量(第一次同步)。
+ */
+export function projectDailyStats(stats: DayStat[], deviceId: string, sinceDay: number): DailyStatRow[] {
+  const out: DailyStatRow[] = [];
+  for (const s of stats) {
+    if (s.day >= sinceDay) {
+      out.push({ deviceId: deviceId, day: s.day, reps: s.reps, ms: s.ms });
+    }
+  }
+  return out;
+}
+
+/**
+ * 本机现算的汇总 + 其他设备的 daily_stat -> 热力图、学习时长用的汇总(按天相加,升序)。
+ * remote 里本机自己的行一律忽略 —— 本机的数只认 review_log(否则会把自己算两遍)。
+ */
+export function mergeDayStats(local: DayStat[], remote: DailyStatRow[], selfDevice: string): DayStat[] {
+  const byDay = new Map<number, DayStat>();
+  for (const s of local) {
+    byDay.set(s.day, { day: s.day, reps: s.reps, ms: s.ms });
+  }
+  for (const r of remote) {
+    if (r.deviceId === selfDevice) {
+      continue;
+    }
+    const cur: DayStat | undefined = byDay.get(r.day);
+    if (cur === undefined) {
+      byDay.set(r.day, { day: r.day, reps: r.reps, ms: r.ms });
+    } else {
+      cur.reps += r.reps;
+      cur.ms += r.ms;
+    }
+  }
+  const out: DayStat[] = Array.from(byDay.values());
+  out.sort((a: DayStat, b: DayStat) => a.day - b.day);
+  return out;
+}
+
+/** 其他设备的每日汇总(本机缓存) */
+export const SQL_REMOTE_DAY_STATS: string = `SELECT device_id, day, reps, ms FROM remote_day_stats`;
+
+/** 同步下载后写进缓存:同一设备同一天整行覆盖(那台设备当天又学了,数会变大) */
+export const SQL_UPSERT_REMOTE_DAY_STAT: string =
+  `INSERT OR REPLACE INTO remote_day_stats (device_id, day, reps, ms) VALUES (?, ?, ?, ?)`;
+
+/** meta 里存本机设备 id 的键。随机 uuid,不用硬件标识(ADR-0006) */
+export const META_DEVICE_ID: string = 'device_id';
+export const SQL_META_VALUE: string = `SELECT value FROM meta WHERE key = ?`;
+
+// ---------------------------------------------------------------- 删除墓碑(Task 8)
+
+/**
+ * 本地删除照旧是真删;**在删之前**记下墓碑,同步时作为 deleted = true 的记录传给其他设备。
+ * 卡片的墓碑表示「这张卡没有排期了」:删卡、删牌组、清空进度三种情况都记。
+ * 参数一律 (now, id)。
+ */
+export const SQL_TOMBSTONE_DECK: string =
+  `INSERT OR REPLACE INTO sync_tombstones (kind, uuid, deleted_at)
+   SELECT 'deck', uuid, ? FROM decks WHERE id = ? AND uuid <> ''`;
+export const SQL_TOMBSTONE_DECK_CARDS: string =
+  `INSERT OR REPLACE INTO sync_tombstones (kind, uuid, deleted_at)
+   SELECT 'card', c.uuid, ? FROM cards c JOIN notes n ON n.id = c.note_id WHERE n.deck_id = ?`;
+export const SQL_TOMBSTONE_NOTE_CARDS: string =
+  `INSERT OR REPLACE INTO sync_tombstones (kind, uuid, deleted_at)
+   SELECT 'card', uuid, ? FROM cards WHERE note_id = ?`;
+/** 清空进度只给**有排期**的卡记墓碑(新卡本来就没有排期,不用传) */
+export const SQL_TOMBSTONE_DECK_SCHED: string =
+  `INSERT OR REPLACE INTO sync_tombstones (kind, uuid, deleted_at)
+   SELECT 'card', c.uuid, ? FROM scheduling s JOIN cards c ON c.id = s.card_id
+     JOIN notes n ON n.id = c.note_id WHERE n.deck_id = ?`;
+/** 同一个 uuid 又活过来了(重新导入 / 又学了),墓碑作废。参数:(kind, uuid) */
+export const SQL_DROP_TOMBSTONE: string = `DELETE FROM sync_tombstones WHERE kind = ? AND uuid = ?`;
+/** 某类的墓碑,deleted_at > ? */
+export const SQL_TOMBSTONES_SINCE: string =
+  `SELECT uuid, deleted_at FROM sync_tombstones WHERE kind = ? AND deleted_at > ?`;
+
+// ---------------------------------------------------------------- 同步的本地一侧(Task 12,SyncLocal.ets)
+
+/** 打卡:ts > ? 的(打卡不删、不改,ts 就是它的 updatedAt) */
+export const SQL_SYNC_CHECKINS_SINCE: string = `SELECT day, ts FROM checkins WHERE ts > ?`;
+export const SQL_SYNC_CHECKIN_TS: string = `SELECT ts FROM checkins WHERE day = ?`;
+
+/**
+ * 本机每日汇总里,最后一次作答晚于 ? 的那些天(增量上传)。参数:(dayAnchor, since)。
+ * last 是那天最后一条流水的时刻,作 updatedAt。
+ */
+export const SQL_SYNC_DAYS_SINCE: string =
+  `SELECT CAST((ts - ?) / 86400000 AS INTEGER) AS day, COUNT(*) AS reps, SUM(cost_ms) AS ms, MAX(ts) AS last
+     FROM review_log GROUP BY day HAVING MAX(ts) > ?`;
+
+/** 牌组:updated_at > ? 的(内容在云存储的 YAML 里,这里只同步「有这副牌组」) */
+export const SQL_SYNC_DECKS_SINCE: string = `SELECT uuid, name, updated_at FROM decks WHERE updated_at > ? AND uuid <> ''`;
+export const SQL_SYNC_DECK_BY_UUID: string = `SELECT id, updated_at FROM decks WHERE uuid = ?`;
+
+/** 卡片排期:updated_at > ? 的,带卡片 uuid */
+export const SQL_SYNC_SCHED_SINCE: string =
+  `SELECT c.uuid AS uuid, s.* FROM scheduling s JOIN cards c ON c.id = s.card_id WHERE s.updated_at > ?`;
+export const SQL_SYNC_SCHED_BY_UUID: string =
+  `SELECT s.updated_at AS updated_at FROM scheduling s JOIN cards c ON c.id = s.card_id WHERE c.uuid = ?`;
+export const SQL_CARD_ID_BY_UUID: string = `SELECT id FROM cards WHERE uuid = ?`;
+export const SQL_TOMBSTONE_AT: string = `SELECT deleted_at FROM sync_tombstones WHERE kind = ? AND uuid = ?`;
+/** 云端来的墓碑写进本地(时刻用云端的,不能用现在 —— 否则会被当成本地新改动再传回去) */
+export const SQL_PUT_TOMBSTONE: string =
+  `INSERT OR REPLACE INTO sync_tombstones (kind, uuid, deleted_at) VALUES (?, ?, ?)`;
+export const SQL_DELETE_SCHED_BY_CARD: string = `DELETE FROM scheduling WHERE card_id = ?`;
+/** 应用云端排期后把 updated_at 设成云端那条的(不是 last_review),参数:(updated_at, card_id) */
+export const SQL_SET_SCHED_UPDATED: string = `UPDATE scheduling SET updated_at = ? WHERE card_id = ?`;
+
+/** 同步水位存在 meta 表 */
+export const META_SYNC_PUSH: string = 'sync_last_push';
+export const META_SYNC_PULL: string = 'sync_last_pull';
+
 /**
  * 全量保持率:答对(评级 >= 良好)占**除首答以外**全部作答的比例。
  *
@@ -843,6 +1067,10 @@ export const SQL_SELECT_NOTE_BY_FINGERPRINT: string =
 /** 某个指纹在库里有没有。列名必须叫 n(Database.scalar 按名字取列) */
 export const SQL_HAS_FINGERPRINT: string =
   `SELECT COUNT(*) AS n FROM notes WHERE fingerprint = ?`;
+
+/** v1 的 8 位旧指纹就地换成 64 位新指纹(planImport.upgrades)。参数:(新, 旧) */
+export const SQL_UPGRADE_FINGERPRINT: string =
+  `UPDATE notes SET fingerprint = ? WHERE fingerprint = ?`;
 
 /** 今日待学总量:到期卡数 + 新卡数,分两条查免得一条 SQL 里塞两种语义 */
 export const SQL_COUNT_DUE: string =
@@ -1167,14 +1395,30 @@ export function makeUuid(prefix: string, now: number): string {
 }
 
 /**
- * 卡片指纹:重复导入时用它认出「还是那张卡」并保住排期(Task 7)。
+ * 卡片指纹:没有 `id` 的旧文件重导时,用它认出「还是那张卡」并保住排期。
  *
- * 取 deck + 标题 + 序号 —— 正好对应 Quizify 强制「标题在文件内唯一且带小节限定」
- * 这条规则。正文改了错别字不影响指纹,所以改文件重导不会丢进度。
+ * 取 deck + 标识键 + 序号 —— 正文改了错别字不影响指纹,所以改文件重导不会丢进度。
+ *
+ * **64 位(16 位十六进制),schema v2 起。** 32 位版本约 1 万张卡就有 ~1% 概率撞车、
+ * 7.7 万张 ~50%;notes.fingerprint 是 UNIQUE,撞车时真正的新卡会被当成旧卡跳过。
+ * 两半用两个不同的 32 位哈希拼成:FNV-1a + 一个 murmur 风格的乘法哈希(带 fmix 收尾)。
+ * 都不依赖任何运行时库,桌面测试能直接跑。
+ *
+ * 旧库里的 8 位指纹无法在迁移时重算(库里只存了标题,没存标识键),
+ * 所以由导入时**惰性升级**:见 planImport 的 upgrades 与 legacyFingerprintOf。
  */
 export function fingerprintOf(deck: string, title: string, ordinal: number): string {
   const raw = `${deck}\u0000${title}\u0000${ordinal}`;
-  // FNV-1a 32 位:够短、够散,且不依赖任何运行时库
+  return fnv1a32(raw) + mix32(raw);
+}
+
+/** schema v1 的 32 位指纹(8 位十六进制)。只用来认出旧库里的行并升级它们 */
+export function legacyFingerprintOf(deck: string, title: string, ordinal: number): string {
+  return fnv1a32(`${deck}\u0000${title}\u0000${ordinal}`);
+}
+
+/** FNV-1a 32 位 -> 8 位十六进制 */
+function fnv1a32(raw: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < raw.length; i++) {
     h ^= raw.charCodeAt(i);
@@ -1183,12 +1427,218 @@ export function fingerprintOf(deck: string, title: string, ordinal: number): str
   return h.toString(16).padStart(8, '0');
 }
 
+/** 第二个 32 位哈希:与 FNV-1a 结构不同,两者同时撞车的概率才接近 2^-64 */
+function mix32(raw: string): string {
+  let h = 0x9747b28c ^ raw.length;
+  for (let i = 0; i < raw.length; i++) {
+    h = Math.imul(h ^ raw.charCodeAt(i), 0x5bd1e995);
+    h ^= h >>> 15;
+  }
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+
+/** 旧指纹 -> 新指纹 的就地升级 */
+export interface FingerprintUpgrade {
+  from: string;
+  to: string;
+}
+
+// ---------------------------------------------------------------- 按 id 导入与更新(Task 4)
+
+/**
+ * 卡片内容哈希(notes.content_hash):同一张卡(同 id / 同指纹)重导时,用它判断内容变没变。
+ * 包含所有用户看得见、改了就该更新的字段;不含身份(id / 指纹)与排期。64 位,算法同指纹。
+ */
+export function contentHashOf(type: number, title: string, front: string, back: string,
+                              options: string[], answer: string, tags: string[]): string {
+  const raw = [`${type}`, title, front, back, options.join('\n'), answer, tags.join('\n')]
+    .join('\u0000');
+  return fnv1a32(raw) + mix32(raw);
+}
+
+/**
+ * 卡片在库里的固定身份。v1 文件里的 `id` 只要求**文件内**唯一,两副牌组都可能有 `c-0001`,
+ * 而 notes.uuid 是全局 UNIQUE —— 所以落库时加上牌组 uuid 作命名空间。
+ * 导出时(Task 5)剥掉 `牌组uuid/` 前缀写回 `id`;牌组 uuid 同时写进 meta.id,
+ * 所以导出 → 另一台设备导入后,这一串完全一样。
+ */
+export function noteUuidOf(deckUuid: string, cardId: string): string {
+  return `${deckUuid}/${cardId}`;
+}
+
+/** 文件里的一张卡,规划导入用的那几样 */
+export interface ImportCardInput {
+  /** v1 的 id;空串 = 没写 */
+  id: string;
+  /** 标识键(指纹取它) */
+  key: string;
+  /** contentHashOf 的结果 */
+  hash: string;
+}
+
+/** 库里已有的一条笔记 */
+export interface ExistingNote {
+  noteId: number;
+  /** '' = v2 之前导入的,还没算过 */
+  hash: string;
+}
+
+/** 已有的卡、内容变了:按 noteId 更新内容,排期不动 */
+export interface NoteUpdate {
+  /** 在文件卡片里的下标 */
+  index: number;
+  noteId: number;
+}
+
+/** planDeckImport 的结果 */
+export interface DeckImportPlan {
+  /** 要新插入的卡(文件下标),保持文件顺序 */
+  fresh: number[];
+  /** 要更新内容的旧卡 */
+  updates: NoteUpdate[];
+  /** 已有且内容没变、原样跳过的张数(含同一文件里重复的那张) */
+  unchanged: number;
+  /** v1 旧指纹的就地升级 */
+  upgrades: FingerprintUpgrade[];
+  /** 文件认领到的已有笔记 id(算「文件里少了几张」用) */
+  matched: number[];
+}
+
+/**
+ * 重导的核心判定(纯函数,查库由调用方注入,只查**这一副牌组**里的笔记):
+ *
+ *   1. 文件写了 id → 先按 id 找;
+ *   2. 找不到 → 按 64 位指纹找;再找不到按 v1 的 8 位旧指纹找(命中就记一条升级);
+ *   3. 找到了:内容哈希相同 → 跳过;不同(或旧行还没有哈希)→ 更新内容,**排期不动**;
+ *   4. 都找不到 → 新卡。
+ *
+ * 同一文件里两张卡认领到同一条笔记时,只有第一张算数,第二张跳过 —— 不会把一条笔记更新两次。
+ * 文件里没有的已有卡**不删**,只由调用方用 matched 算出数量提示用户(已与用户确认)。
+ */
+export function planDeckImport(deck: string, cards: ImportCardInput[],
+                               byId: (id: string) => ExistingNote | null,
+                               byFp: (fp: string) => ExistingNote | null): DeckImportPlan {
+  const plan: DeckImportPlan = { fresh: [], updates: [], unchanged: 0, upgrades: [], matched: [] };
+  const seenFp = new Set<string>();
+  for (let i = 0; i < cards.length; i++) {
+    const c: ImportCardInput = cards[i];
+    const fp: string = fingerprintOf(deck, c.key, 0);
+    if (seenFp.has(fp)) {
+      plan.unchanged++;
+      continue;
+    }
+    seenFp.add(fp);
+
+    let ex: ExistingNote | null = c.id.length > 0 ? byId(c.id) : null;
+    if (ex === null) {
+      ex = byFp(fp);
+    }
+    if (ex === null) {
+      const old: string = legacyFingerprintOf(deck, c.key, 0);
+      ex = byFp(old);
+      if (ex !== null) {
+        plan.upgrades.push({ from: old, to: fp });
+      }
+    }
+    if (ex === null) {
+      plan.fresh.push(i);
+      continue;
+    }
+    if (plan.matched.includes(ex.noteId)) {
+      plan.unchanged++;
+      continue;
+    }
+    plan.matched.push(ex.noteId);
+    if (ex.hash === c.hash) {
+      plan.unchanged++;
+    } else {
+      plan.updates.push({ index: i, noteId: ex.noteId });
+    }
+  }
+  return plan;
+}
+
+/** 按 id 找笔记,只在这副牌组里。参数:(deckId, 命名空间形式的 uuid, 原样的 id) —— 后者认 v2 之前的行 */
+export const SQL_NOTE_BY_UUID_IN_DECK: string =
+  `SELECT id, content_hash FROM notes WHERE deck_id = ? AND (uuid = ? OR uuid = ?) LIMIT 1`;
+
+/** 按指纹找笔记,只在这副牌组里。参数:(deckId, fingerprint) */
+export const SQL_NOTE_BY_FP_IN_DECK: string =
+  `SELECT id, content_hash FROM notes WHERE deck_id = ? AND fingerprint = ? LIMIT 1`;
+
+/** 新卡落库(schema v2 全列)。参数顺序见 Database.insertNoteRow 与 import_test */
+export const SQL_INSERT_NOTE_V2: string =
+  `INSERT INTO notes (deck_id, type, front, back, title, options, answer, source_file,
+                      fingerprint, uuid, updated_at, content_hash, tags)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+/** 重导时更新一张旧卡的内容。**身份(uuid / 指纹)与排期都不动。** 最后一个参数是 note id */
+export const SQL_UPDATE_NOTE_CONTENT: string =
+  `UPDATE notes SET type = ?, front = ?, back = ?, title = ?, options = ?, answer = ?,
+          tags = ?, content_hash = ?, source_file = ?, updated_at = ? WHERE id = ?`;
+
+/** 按 meta.id 找牌组 */
+export const SQL_DECK_BY_UUID: string = `SELECT id, uuid FROM decks WHERE uuid = ?`;
+/** 按名字找牌组(带 uuid) */
+export const SQL_DECK_REF_BY_NAME: string = `SELECT id, uuid FROM decks WHERE name = ?`;
+
+/** 导入后写回牌组信息。参数:(tags JSON, meta JSON, version, now, deckId) */
+export const SQL_UPDATE_DECK_INFO: string =
+  `UPDATE decks SET tags = ?, meta = ?, version = ?, updated_at = ? WHERE id = ?`;
+
+/** 文件里少了几张:这副牌组现有笔记数 − 文件认领到的 */
+export function missingCount(deckNoteCount: number, plan: DeckImportPlan): number {
+  return Math.max(0, deckNoteCount - plan.matched.length);
+}
+
+// ---------------------------------------------------------------- 导出(Task 5)
+
+/** 导出一副牌组的牌组信息。**只取内容列** */
+export const SQL_EXPORT_DECK: string = `SELECT name, uuid, tags, meta FROM decks WHERE id = ?`;
+
+/**
+ * 导出一副牌组的全部卡片,按导入顺序。**只取内容列,不 JOIN scheduling / review_log** ——
+ * 导出文件里没有任何个人学习数据(docs/data-model.md §6)。
+ */
+export const SQL_EXPORT_NOTES: string =
+  `SELECT uuid, type, title, front, back, options, answer, tags
+     FROM notes WHERE deck_id = ? AND deleted_at = 0 ORDER BY id ASC`;
+
+/** tags 列(JSON 文本)-> 数组。旧行或坏数据一律当空列表,不让导出因为一列失败 */
+export function parseTagsColumn(raw: string): string[] {
+  if (raw.length === 0) {
+    return [];
+  }
+  try {
+    const v: Object = JSON.parse(raw) as Object;
+    if (!Array.isArray(v)) {
+      return [];
+    }
+    const out: string[] = [];
+    for (const x of v as Object[]) {
+      if (typeof x === 'string' && x.length > 0) {
+        out.push(x as string);
+      }
+    }
+    return out;
+  } catch (e) {
+    return [];
+  }
+}
+
 /** planImport 的结果:要插入的卡(下标)与跳过的张数 */
 export interface ImportPlan {
   /** parsed.cards 里要新插入的那些的下标,保持文件里的顺序 */
   fresh: number[];
   /** 库里已有(或同一个文件里前面已经出现过)而跳过的张数 */
   skipped: number;
+  /** 命中了 v1 旧指纹的行:调用方在同一个事务里把它们改成 64 位指纹 */
+  upgrades: FingerprintUpgrade[];
 }
 
 /**
@@ -1198,11 +1648,15 @@ export interface ImportPlan {
  * 于是重导同一个文件会在第一张旧卡上失败,而排在它前面的新卡已经写进去了。
  * 现在先按指纹分好新旧,只插新卡(调用方包事务)。
  *
+ * 先查 64 位新指纹;查不到再查 v1 的 32 位旧指纹 —— 命中就是 v2 之前导入的那张卡,
+ * 也算旧卡跳过,并记进 upgrades 让调用方把那一行升级成新指纹。
+ *
  * 同一个文件里两张卡算出同一个指纹时(Quizify 已经拦住了键重复,这里是兜底),
  * 第二张也算跳过,不会让 UNIQUE 中途抛错。纯函数:查库由 `exists` 注入,桌面测试能直接跑。
  */
 export function planImport(deck: string, keys: string[], exists: (fp: string) => boolean): ImportPlan {
   const fresh: number[] = [];
+  const upgrades: FingerprintUpgrade[] = [];
   const seen = new Set<string>();
   let skipped = 0;
   for (let i = 0; i < keys.length; i++) {
@@ -1210,9 +1664,15 @@ export function planImport(deck: string, keys: string[], exists: (fp: string) =>
     if (seen.has(fp) || exists(fp)) {
       skipped++;
     } else {
-      fresh.push(i);
+      const old: string = legacyFingerprintOf(deck, keys[i], 0);
+      if (exists(old)) {
+        skipped++;
+        upgrades.push({ from: old, to: fp });
+      } else {
+        fresh.push(i);
+      }
     }
     seen.add(fp);
   }
-  return { fresh: fresh, skipped: skipped };
+  return { fresh: fresh, skipped: skipped, upgrades: upgrades };
 }

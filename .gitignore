@@ -25,6 +25,11 @@ build.log
 /devtest/Schema.ts
 /devtest/Inline.ts
 /devtest/Yaml.ts
+/devtest/YamlExport.ts
+/devtest/SyncCore.ts
+
+# 发布工具的本地镜像(已发布牌组 + catalog.json),是云存储 public/ 的副本
+/tools/publish/mirror/
 /devtest/Steps.ts
 
 # 系统垃圾

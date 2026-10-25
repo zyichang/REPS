@@ -16,7 +16,7 @@ SRC="$(cd "$(dirname "$0")/.." && pwd)/testdata"
 
 # 每条 hdc 命令都带超时:设备没响应时宁可报错,也不要无限挂住
 timeout 10 "$HDC" list targets | tr -d '\r' | grep -qx "$TARGET" || { echo "设备 $TARGET 不在线"; exit 1; }
-for f in "$SRC"/*.md "$SRC"/*.yml; do
+for f in "$SRC"/*.md "$SRC"/*.yml "$SRC"/*.yaml; do
   timeout 60 "$HDC" -t "$TARGET" file send "$(wslpath -w "$f")" "$DEST/$(basename "$f")"
 done
 timeout 10 "$HDC" -t "$TARGET" shell "ls -la $DEST"

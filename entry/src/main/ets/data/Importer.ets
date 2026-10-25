@@ -39,8 +39,12 @@ export interface ImportResult {
   name: string;
   deck: string;
   cardsAdded: number;
-  /** 库里已经有、所以跳过的张数(重导同一个文件时就是全部) */
+  /** 库里已经有、内容没变而跳过的张数(重导同一个文件时就是全部) */
   cardsSkipped: number;
+  /** 库里已经有、内容变了而更新的张数(学习进度保留) */
+  cardsUpdated: number;
+  /** 牌组里有、文件里没有的张数(不删,只提示) */
+  cardsMissing: number;
   /** 文件里原本没有 front matter,卡组名是用文件名兜底的 */
   usedFallbackDeck: boolean;
   /** 用户在文件选择器里点了取消:不是错误,界面上什么都不用说 */
@@ -56,8 +60,10 @@ export interface ImportResult {
 export async function pickDeckFile(context: common.UIAbilityContext): Promise<string> {
   const options = new picker.DocumentSelectOptions();
   options.maxSelectNumber = 1;
-  // 过滤器带上 .md 与 .markdown;有些设备上过滤器为空才显示全部文件
-  options.fileSuffixFilters = ['.md', '.markdown', '.yaml', '.yml'];
+  // **一个元素就是「文件类型」下拉里的一项,默认只启用第一项。** 原来写成四个元素
+  // ['.md', '.markdown', '.yaml', '.yml'],结果只显示 .md,YAML 文件在选择器里根本看不见
+  // (2026-10-25 模拟器实测)。所以合成一项「描述|后缀,后缀」,YAML 放前面(主格式,ADR-0007)。
+  options.fileSuffixFilters = ['REPS 卡组|.yaml,.yml,.md,.markdown'];
 
   const viewPicker = new picker.DocumentViewPicker(context);
   const uris: string[] = await viewPicker.select(options);
@@ -111,10 +117,8 @@ export function deckNameFromUri(uri: string): string {
 /**
  * 把一份已解析的卡组写进数据库。
  *
- * 一个文件一个卡组,名字就是 front matter 里的 deck ——
- * 卡组是平的,没有层级(见 Schema 里 decks 的注释)。
- * **已存在的指纹直接跳过**,只插新卡,整次导入一个事务(Database.importDeck)。
- * 以后可以把「跳过」升级成「保留排期、更新内容」。
+ * 一个文件一个卡组。先按 id、再按指纹认出旧卡:内容变了就更新(排期保留),
+ * 没变就跳过;新卡插入;文件里少了的不删。整次导入一个事务(Database.importDeck)。
  */
 export function storeDeck(db: Database, parsed: ParsedDeck, sourceFile: string,
                           now: number): StoreResult {
@@ -150,8 +154,8 @@ export async function importFromPicker(context: common.UIAbilityContext,
 
   let parsed: ParsedDeck;
   try {
-    // 按扩展名分派。两条路都产出 ParsedDeck —— YAML 那条先转成
-    // Quizify 文本,所以题型判定与 Markdown 完全一致(见 Yaml.ets)。
+    // 按扩展名分派。两条路都产出同样形状的 ParsedDeck:YAML 是主格式(v1 直接产出卡片),
+    // .md 走 Quizify 兼容导入(ADR-0007)。
     parsed = isYamlName(uri) ? parseYamlDeck(text) : parseQuizify(text, name);
   } catch (e) {
     const msg = e instanceof QuizifyError ? e.message : String(e);
@@ -166,6 +170,8 @@ export async function importFromPicker(context: common.UIAbilityContext,
     return {
       ok: true, cancelled: false, name: name, deck: parsed.deck, cardsAdded: added,
       cardsSkipped: stored.skipped,
+      cardsUpdated: stored.updated,
+      cardsMissing: stored.missing,
       usedFallbackDeck: !parsed.hadFrontMatter, error: '',
     };
   } catch (e) {
@@ -176,6 +182,7 @@ export async function importFromPicker(context: common.UIAbilityContext,
 function fail(name: string, error: string): ImportResult {
   return {
     ok: false, cancelled: false, name: name, deck: '', cardsAdded: 0, cardsSkipped: 0,
+    cardsUpdated: 0, cardsMissing: 0,
     usedFallbackDeck: false, error: error,
   };
 }

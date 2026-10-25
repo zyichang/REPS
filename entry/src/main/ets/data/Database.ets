@@ -26,22 +26,49 @@ import {
   MIGRATE_ADD_ARCHIVED, SQL_HAS_ARCHIVED_COL,
   SQL_DELETE_DECK_SCHED, SQL_DELETE_NOTE, SQL_DELETE_NOTE_CARDS,
   SQL_DELETE_NOTE_SCHED, SQL_DUE_CARDS, SQL_DUE_CARDS_IN_DECK, SQL_DUE_FORECAST,
-  SQL_DUE_FORECAST_IN_DECK, SQL_HAS_PARENT_COL, SQL_INSERT_CARD, SQL_INSERT_DECK,
-  SQL_INSERT_LOG, SQL_INSERT_NOTE, SQL_LIST_CARDS_ALL, SQL_LIST_CARDS_IN_DECK, SQL_LIST_DECKS,
+  SQL_DUE_FORECAST_IN_DECK, SQL_HAS_PARENT_COL,
+  SQL_INSERT_LOG, SQL_LIST_CARDS_ALL, SQL_LIST_CARDS_IN_DECK, SQL_LIST_DECKS,
   SQL_LOG_SINCE, SQL_NEW_CARDS, SQL_NEW_CARDS_IN_DECK, SQL_NEW_INTRODUCED_TODAY,
   SQL_RETENTION_ALL, SQL_REVIEWED_TODAY, SQL_SELECT_DECK_ID, SQL_SELECT_DECK_NAME,
   SQL_SELECT_NOTE_BY_CARD, SQL_SELECT_SCHEDULING, SQL_STABILITY_HISTOGRAM,
   SQL_STABILITY_IN_DECK, SQL_TODAY_PROGRESS, SQL_UNLEARNED_COUNT, SQL_UNTOUCHED_DUE,
   SQL_UPDATE_NOTE_TEXT, SQL_UPSERT_SCHEDULING, SchedulingRow, TodayProgress, fingerprintOf,
-  fromSchedulingRow, isValidAlgo, makeUuid, schedulingValues, toSchedulingRow,
-  ImportPlan, SQL_HAS_FINGERPRINT, planImport,
+  fromSchedulingRow, isValidAlgo, schedulingValues, toSchedulingRow,
+  SQL_HAS_FINGERPRINT, legacyFingerprintOf, Migration, pendingMigrations,
+  SCHEMA_VERSION, SQL_TOUCH_SCHEDULING, SQL_UPGRADE_FINGERPRINT,
+  DeckImportPlan, ExistingNote, ImportCardInput, SQL_DECK_BY_UUID,
+  SQL_DECK_REF_BY_NAME, SQL_NOTE_BY_FP_IN_DECK, SQL_NOTE_BY_UUID_IN_DECK, SQL_UPDATE_DECK_INFO,
+  SQL_UPDATE_NOTE_CONTENT, contentHashOf, missingCount, noteUuidOf, planDeckImport,
+  SQL_EXPORT_DECK, SQL_EXPORT_NOTES, parseTagsColumn,
+  DailyStatRow, META_DEVICE_ID, SQL_META_VALUE, SQL_REMOTE_DAY_STATS, SQL_UPSERT_REMOTE_DAY_STAT,
+  mergeDayStats, SQL_TOMBSTONE_DECK, SQL_TOMBSTONE_DECK_CARDS, SQL_TOMBSTONE_DECK_SCHED,
+  SQL_TOMBSTONE_NOTE_CARDS,
 } from './Schema';
-import { ParsedCard, ParsedDeck } from './Quizify';
+import { DeckMeta, ParsedCard, ParsedDeck, emptyMeta } from './Quizify';
+import { ExportCard, ExportDeck, exportYaml } from './YamlExport';
+import { util } from '@kit.ArkTS';
 
 /** importDeck 的结果 */
 export interface StoreResult {
+  /** 新插入的张数 */
   added: number;
+  /** 已有、内容没变而跳过的张数 */
   skipped: number;
+  /** 已有、内容变了而更新的张数(排期保留) */
+  updated: number;
+  /** 牌组里有、这次文件里没有的张数(没有删除,只提示) */
+  missing: number;
+}
+
+/** 一副牌组的本地 id 与固定身份 */
+interface DeckRef {
+  id: number;
+  uuid: string;
+}
+
+/** 一张卡的内容哈希(notes.content_hash) */
+function cardHash(c: ParsedCard): string {
+  return contentHashOf(c.type as number, c.title, c.front, c.back, c.options, c.answer, c.tags);
 }
 
 const DOMAIN: number = 0x0A01;
@@ -63,7 +90,42 @@ export class Database {
     await this.flattenDecksIfNeeded();
     await this.addArchivedIfNeeded();
     await this.backfillCheckinsOnce();
-    hilog.info(DOMAIN, TAG, '数据库就绪,已执行 %{public}d 条 DDL', DDL.length);
+    await this.migrate();
+    hilog.info(DOMAIN, TAG, '数据库就绪,已执行 %{public}d 条 DDL,schema v%{public}d',
+      DDL.length, this.db().version);
+  }
+
+  /**
+   * 版本化迁移(schema v2 起):按 RdbStore.version(= PRAGMA user_version)只跑没跑过的。
+   * 每个版本一个事务,提交之后才写版本号 —— 崩在中途,下次启动整版重跑。
+   * 逻辑与 devtest/migration_test.ts 里的 migrate() 一一对应。
+   */
+  private async migrate(): Promise<void> {
+    const store = this.db();
+    const todo: Migration[] = pendingMigrations(store.version);
+    for (const m of todo) {
+      hilog.info(DOMAIN, TAG, '迁移到 schema v%{public}d', m.version);
+      store.beginTransaction();
+      try {
+        for (const stmt of m.statements) {
+          await store.executeSql(stmt);
+        }
+        store.commit();
+      } catch (e) {
+        store.rollBack();
+        hilog.error(DOMAIN, TAG, '迁移 v%{public}d 失败,已回滚: %{public}s', m.version, `${e}`);
+        throw new Error(`数据库迁移 v${m.version} 失败: ${e}`);
+      }
+      store.version = m.version;
+    }
+    if (store.version !== SCHEMA_VERSION) {
+      throw new Error(`数据库版本 ${store.version} 与应用要求的 ${SCHEMA_VERSION} 不一致`);
+    }
+  }
+
+  /** 新的固定身份(牌组 / 笔记 / 卡片)。生成一次,之后永不改变 */
+  private newUuid(): string {
+    return util.generateRandomUUID(true);
   }
 
   /**
@@ -177,6 +239,7 @@ export class Database {
   saveState(state: CardState): void {
     const values: number[] = schedulingValues(toSchedulingRow(state));
     this.db().executeSync(SQL_UPSERT_SCHEDULING, values as Array<relationalStore.ValueType>);
+    this.db().executeSync(SQL_TOUCH_SCHEDULING, [state.cardId] as Array<relationalStore.ValueType>);
   }
 
   /** 读一张卡的排期状态。返回 null 表示这张卡还没被答过(新卡) */
@@ -243,20 +306,6 @@ export class Database {
 
   // ------------------------------------------------------------ 写入卡组/笔记/卡片
 
-  /** 取得卡组 id,不存在则创建。卡组是平的,所以只按名字认 */
-  ensureDeck(name: string): number {
-    this.db().executeSync(SQL_INSERT_DECK, [name] as Array<relationalStore.ValueType>);
-    const rs = this.db().querySqlSync(SQL_SELECT_DECK_ID, [name]);
-    try {
-      if (!rs.goToFirstRow()) {
-        throw new Error(`卡组创建失败: ${name}`);
-      }
-      return rs.getLong(rs.getColumnIndex('id'));
-    } finally {
-      rs.close();
-    }
-  }
-
   /**
    * 写入一条笔记及其卡片,返回卡片 id 列表。
    *
@@ -265,32 +314,41 @@ export class Database {
    *   key   是标识部分(如「基础选择 (1)」),指纹取它。
    * 用 title 算指纹的话,用户改一个错别字就会被当成新卡,进度全丢。
    *
-   * cardCount 由题型决定:问答与选择题恒为 1,完形填空等于挖空个数。
+   * 一条笔记恒为一张卡(ADR-0002)。**卡片 uuid 与笔记 uuid 相同** —— 同步时
+   * card_state 按它对卡,两台设备从同一份导出 YAML 导入后这一串完全一样。
    */
-  insertNote(deckId: number, deckName: string, type: NoteType, front: string, back: string,
-             title: string, key: string, options: string[], answer: string,
-             sourceFile: string, cardCount: number, now: number): number[] {
-    const noteId: number = this.insertNoteRow(deckId, deckName, type, front, back,
-      title, key, options, answer, sourceFile, 0, now);
-    const ids: number[] = [];
-    for (let i = 0; i < cardCount; i++) {
-      this.db().executeSync(SQL_INSERT_CARD,
-        [noteId, i, makeUuid('c', now), now] as Array<relationalStore.ValueType>);
-      ids.push(this.lastInsertId('cards'));
-    }
-    return ids;
+  insertNote(deckId: number, deckName: string, c: ParsedCard, sourceFile: string,
+             uuid: string, now: number): number[] {
+    const noteId: number = this.insertNoteRow(deckId, deckName, c, sourceFile, uuid, now);
+    const card: relationalStore.ValuesBucket = {
+      note_id: noteId, ordinal: 0, uuid: uuid, updated_at: now,
+    };
+    return [this.db().insertSync('cards', card)];
   }
 
-  private insertNoteRow(deckId: number, deckName: string, type: NoteType, front: string,
-                        back: string, title: string, key: string, options: string[],
-                        answer: string, sourceFile: string, ordinal: number,
-                        now: number): number {
-    const fp: string = fingerprintOf(deckName, key, ordinal);
-    this.db().executeSync(SQL_INSERT_NOTE, [
-      deckId, type as number, front, back, title, options.join('\n'), answer,
-      sourceFile, fp, makeUuid('n', now), now,
-    ] as Array<relationalStore.ValueType>);
-    return this.lastInsertId('notes');
+  /**
+   * 写一行 notes。用 insertSync 拿新 id —— 不能 INSERT 后再 `SELECT MAX(id)`:
+   * 那条查询走读连接,在 importDeck 的事务里看不到刚写的行(CONTEXT 陷阱 5)。
+   * 列与 Schema.SQL_INSERT_NOTE_V2 一致(桌面测试 reimport_test 用的是那一条)。
+   */
+  private insertNoteRow(deckId: number, deckName: string, c: ParsedCard, sourceFile: string,
+                        uuid: string, now: number): number {
+    const note: relationalStore.ValuesBucket = {
+      deck_id: deckId,
+      type: c.type as number,
+      front: c.front,
+      back: c.back,
+      title: c.title,
+      options: c.options.join('\n'),
+      answer: c.answer,
+      source_file: sourceFile,
+      fingerprint: fingerprintOf(deckName, c.key, 0),
+      uuid: uuid,
+      updated_at: now,
+      content_hash: cardHash(c),
+      tags: JSON.stringify(c.tags),
+    };
+    return this.db().insertSync('notes', note);
   }
 
   /** 取一张卡的完整内容,供复习界面显示。找不到返回 null */
@@ -348,17 +406,6 @@ export class Database {
     try {
       rs.goToFirstRow();
       return rs.getLong(rs.getColumnIndex('n'));
-    } finally {
-      rs.close();
-    }
-  }
-
-  private lastInsertId(table: string): number {
-    // 只读一个标量,不值得为它在 Schema 里单开常量;表名由调用方给定,不来自外部输入
-    const rs = this.db().querySqlSync(`SELECT MAX(id) AS id FROM ${table}`);
-    try {
-      rs.goToFirstRow();
-      return rs.getLong(rs.getColumnIndex('id'));
     } finally {
       rs.close();
     }
@@ -590,6 +637,10 @@ export class Database {
    */
   deleteDeck(deckId: number): void {
     const d = this.db();
+    // 先记墓碑(同步时传给其他设备),再真删
+    const t: Array<relationalStore.ValueType> = [Date.now(), deckId] as Array<relationalStore.ValueType>;
+    d.executeSync(SQL_TOMBSTONE_DECK_CARDS, t);
+    d.executeSync(SQL_TOMBSTONE_DECK, t);
     // 流水不删:综合统计按整个应用算(ADR-0005)
     d.executeSync(SQL_DELETE_DECK_SCHED, [deckId] as Array<relationalStore.ValueType>);
     d.executeSync(SQL_DELETE_DECK_CARDS, [deckId] as Array<relationalStore.ValueType>);
@@ -611,6 +662,8 @@ export class Database {
     const a: Array<relationalStore.ValueType> = [deckId] as Array<relationalStore.ValueType>;
     // 流水只归档不删:时间与打卡仍计入综合统计,本组「今日已学」不再看它们
     d.executeSync(SQL_ARCHIVE_DECK_LOGS, a);
+    // 有排期的卡记墓碑,其他设备同步后也变回新卡
+    d.executeSync(SQL_TOMBSTONE_DECK_SCHED, [Date.now(), deckId] as Array<relationalStore.ValueType>);
     d.executeSync(SQL_DELETE_DECK_SCHED, a);
   }
 
@@ -645,11 +698,6 @@ export class Database {
     return out;
   }
 
-  /**
-   * 手工新建一张卡。题型 / 标题 / 选项 / 答案由调用方先用 Quizify 那条路解析出来
-   * (见 Quizify.parseOneCard),所以手工卡与导入卡的形状完全一致。
-   * 返回新卡的 card id。
-   */
   /** 这个指纹在库里有没有(导入判断新旧卡、手工新建判断重复都用它) */
   hasFingerprint(fp: string): boolean {
     return this.scalar(SQL_HAS_FINGERPRINT, [fp] as Array<relationalStore.ValueType>) > 0;
@@ -658,34 +706,66 @@ export class Database {
   /**
    * 手工新建时:这个牌组里是不是已经有同一个标识键的卡了。
    * 有的话插入会撞上 notes.fingerprint 的 UNIQUE —— 编辑页先问一声,给出能看懂的提示。
+   * v2 之前导入的卡还是 8 位旧指纹,两种都要查。
    */
   hasCardKey(deckName: string, key: string): boolean {
-    return this.hasFingerprint(fingerprintOf(deckName, key, 0));
+    return this.hasFingerprint(fingerprintOf(deckName, key, 0)) ||
+      this.hasFingerprint(legacyFingerprintOf(deckName, key, 0));
   }
 
   /**
-   * 导入一份已解析的卡组:**指纹已在库里的是旧卡,跳过;只插新卡。**
+   * 导入一份已解析的卡组(Task 4,docs/data-model.md §3):
+   *
+   *   - 牌组:先按 meta.id 认,再按名字认,都没有就新建(uuid 取 meta.id,没有就生成);
+   *   - 卡片:先按 id、再按指纹认(Schema.planDeckImport,桌面测试 reimport_test 逐步对应);
+   *     认出来的旧卡内容变了就更新内容,**排期不动**;新卡插入;
+   *   - 文件里少了的已有卡不删,只算出数量交给界面提示。
    *
    * 整次导入一个事务:中途任何一张失败,全部回滚,库里不会留下导入了一半的文件。
-   * 新旧的判定是纯函数 Schema.planImport(桌面测试覆盖)。
+   * 事务里的查询只能看见**事务开始前**就提交的行(CONTEXT 陷阱 5)—— 认卡查的正是这些,
+   * 本次新插的行不需要被查到(同一文件里的重复由 planDeckImport 自己去掉)。
    */
   importDeck(parsed: ParsedDeck, sourceFile: string, now: number): StoreResult {
     const store = this.db();
     store.beginTransaction();
     try {
-      const deckId: number = this.ensureDeck(parsed.deck);
-      const keys: string[] = parsed.cards.map((c: ParsedCard) => c.key);
-      const plan: ImportPlan = planImport(parsed.deck, keys, (fp: string) => this.hasFingerprint(fp));
+      const deck: DeckRef = this.resolveDeck(parsed, now);
+      const inputs: ImportCardInput[] = parsed.cards.map((c: ParsedCard): ImportCardInput => {
+        return { id: c.id, key: c.key, hash: cardHash(c) };
+      });
+      const plan: DeckImportPlan = planDeckImport(parsed.deck, inputs,
+        (id: string) => this.existingNote(SQL_NOTE_BY_UUID_IN_DECK,
+          [deck.id, noteUuidOf(deck.uuid, id), id] as Array<relationalStore.ValueType>),
+        (fp: string) => this.existingNote(SQL_NOTE_BY_FP_IN_DECK,
+          [deck.id, fp] as Array<relationalStore.ValueType>));
+      const before: number = this.scalar(SQL_DECK_NOTE_COUNT, [deck.id] as Array<relationalStore.ValueType>);
+
+      for (const u of plan.upgrades) {
+        store.executeSync(SQL_UPGRADE_FINGERPRINT, [u.to, u.from] as Array<relationalStore.ValueType>);
+      }
+      for (const u of plan.updates) {
+        const c: ParsedCard = parsed.cards[u.index];
+        store.executeSync(SQL_UPDATE_NOTE_CONTENT, [
+          c.type as number, c.front, c.back, c.title, c.options.join('\n'), c.answer,
+          JSON.stringify(c.tags), cardHash(c), sourceFile, now, u.noteId,
+        ] as Array<relationalStore.ValueType>);
+      }
       let added = 0;
       for (const i of plan.fresh) {
         const c: ParsedCard = parsed.cards[i];
         // **导入进来一张,落库就是一张。**挖空数不再决定卡片数(ADR-0002)
-        const ids: number[] = this.insertNote(deckId, parsed.deck, c.type, c.front, c.back,
-          c.title, c.key, c.options, c.answer, sourceFile, 1, now);
+        const uuid: string = noteUuidOf(deck.uuid, c.id.length > 0 ? c.id : this.newUuid());
+        const ids: number[] = this.insertNote(deck.id, parsed.deck, c, sourceFile, uuid, now);
         added += ids.length;
       }
+      store.executeSync(SQL_UPDATE_DECK_INFO, [
+        JSON.stringify(parsed.tags), JSON.stringify(parsed.meta), parsed.meta.version, now, deck.id,
+      ] as Array<relationalStore.ValueType>);
       store.commit();
-      return { added: added, skipped: plan.skipped };
+      return {
+        added: added, skipped: plan.unchanged, updated: plan.updates.length,
+        missing: missingCount(before, plan),
+      };
     } catch (e) {
       store.rollBack();
       hilog.error(DOMAIN, TAG, '导入失败,已回滚: %{public}s', `${e}`);
@@ -693,9 +773,112 @@ export class Database {
     }
   }
 
+  /**
+   * 把一副牌组导出成 REPS Card YAML v1 文本(Task 5)。返回 [牌组名, 文本]。
+   * 与桌面测试 export_test 的 exportFrom 一步一步对应;只读内容列,不碰排期与流水。
+   */
+  exportDeckYaml(deckId: number): string[] {
+    const rs = this.db().querySqlSync(SQL_EXPORT_DECK, [deckId]);
+    let deck: ExportDeck;
+    try {
+      if (!rs.goToFirstRow()) {
+        throw new Error(`找不到牌组 ${deckId}`);
+      }
+      const metaRaw: string = rs.getString(rs.getColumnIndex('meta'));
+      const meta: DeckMeta = emptyMeta();
+      if (metaRaw.length > 0) {
+        const m: DeckMeta = JSON.parse(metaRaw) as DeckMeta;
+        meta.version = typeof m.version === 'number' ? m.version : 0;
+        meta.author = m.author ?? '';
+        meta.language = m.language ?? '';
+        meta.license = m.license ?? '';
+        meta.description = m.description ?? '';
+        meta.source = m.source ?? '';
+        meta.generatedBy = m.generatedBy ?? '';
+      }
+      deck = {
+        name: rs.getString(rs.getColumnIndex('name')),
+        uuid: rs.getString(rs.getColumnIndex('uuid')),
+        tags: parseTagsColumn(rs.getString(rs.getColumnIndex('tags'))),
+        meta: meta,
+      };
+    } finally {
+      rs.close();
+    }
+    const cards: ExportCard[] = [];
+    const ns = this.db().querySqlSync(SQL_EXPORT_NOTES, [deckId]);
+    try {
+      while (ns.goToNextRow()) {
+        const opts: string = ns.getString(ns.getColumnIndex('options'));
+        cards.push({
+          uuid: ns.getString(ns.getColumnIndex('uuid')),
+          type: ns.getLong(ns.getColumnIndex('type')),
+          title: ns.getString(ns.getColumnIndex('title')),
+          front: ns.getString(ns.getColumnIndex('front')),
+          back: ns.getString(ns.getColumnIndex('back')),
+          options: opts.length > 0 ? opts.split('\n') : [],
+          answer: ns.getString(ns.getColumnIndex('answer')),
+          tags: parseTagsColumn(ns.getString(ns.getColumnIndex('tags'))),
+        });
+      }
+    } finally {
+      ns.close();
+    }
+    return [deck.name, exportYaml(deck, cards)];
+  }
+
+  /** 导入的目标牌组:先 meta.id,再名字,都没有就新建 */
+  private resolveDeck(parsed: ParsedDeck, now: number): DeckRef {
+    if (parsed.meta.id.length > 0) {
+      const byUuid: DeckRef | null = this.deckRef(SQL_DECK_BY_UUID, parsed.meta.id);
+      if (byUuid !== null) {
+        return byUuid;
+      }
+    }
+    // 同名牌组已存在(且 uuid 不同)时并进去,沿用它原来的 uuid —— 名字是 UNIQUE 的
+    const byName: DeckRef | null = this.deckRef(SQL_DECK_REF_BY_NAME, parsed.deck);
+    if (byName !== null) {
+      return byName;
+    }
+    const uuid: string = parsed.meta.id.length > 0 ? parsed.meta.id : this.newUuid();
+    const bucket: relationalStore.ValuesBucket = { name: parsed.deck, uuid: uuid, updated_at: now };
+    return { id: this.db().insertSync('decks', bucket), uuid: uuid };
+  }
+
+  private deckRef(sql: string, arg: string): DeckRef | null {
+    const rs = this.db().querySqlSync(sql, [arg]);
+    try {
+      if (!rs.goToFirstRow()) {
+        return null;
+      }
+      return { id: rs.getLong(rs.getColumnIndex('id')), uuid: rs.getString(rs.getColumnIndex('uuid')) };
+    } finally {
+      rs.close();
+    }
+  }
+
+  private existingNote(sql: string, args: Array<relationalStore.ValueType>): ExistingNote | null {
+    const rs = this.db().querySqlSync(sql, args);
+    try {
+      if (!rs.goToFirstRow()) {
+        return null;
+      }
+      return {
+        noteId: rs.getLong(rs.getColumnIndex('id')),
+        hash: rs.getString(rs.getColumnIndex('content_hash')),
+      };
+    } finally {
+      rs.close();
+    }
+  }
+
+  /**
+   * 手工新建一张卡。题型 / 标题 / 选项 / 答案由调用方先用 Quizify 那条路解析出来
+   * (见 Quizify.parseOneCard),所以手工卡与导入卡的形状完全一致。
+   * 返回新卡的 card id。
+   */
   insertManualCard(deckId: number, deckName: string, c: ParsedCard, now: number): number {
-    const ids: number[] = this.insertNote(deckId, deckName, c.type, c.front, c.back,
-      c.title, c.key, c.options, c.answer, '手工添加', 1, now);
+    const ids: number[] = this.insertNote(deckId, deckName, c, '手工添加', this.newUuid(), now);
     return ids.length > 0 ? ids[0] : 0;
   }
 
@@ -714,6 +897,7 @@ export class Database {
   deleteNote(noteId: number): void {
     const d = this.db();
     const a: Array<relationalStore.ValueType> = [noteId] as Array<relationalStore.ValueType>;
+    d.executeSync(SQL_TOMBSTONE_NOTE_CARDS, [Date.now(), noteId] as Array<relationalStore.ValueType>);
     d.executeSync(SQL_DELETE_NOTE_SCHED, a);
     d.executeSync(SQL_DELETE_NOTE_CARDS, a);
     d.executeSync(SQL_DELETE_NOTE, a);
@@ -743,10 +927,16 @@ export class Database {
   }
 
   /**
-   * 按天汇总的全部历史。anchor 必须由 Schema 的日界口径算出来
-   * (见 dayAnchor()),这样返回的 day 与 dayIndex() 同义。
+   * 按天汇总的全部历史:**本机流水现算 + 其他设备同步下来的汇总**(ADR-0006 方案 A)。
+   * 热力图、学习天数、学习时长都读它;还没同步过时其他设备为空,结果与本机完全一样。
+   * anchor 必须由 Schema 的日界口径算出来(见 dayAnchor()),这样返回的 day 与 dayIndex() 同义。
    */
   dayStats(anchor: number): DayStat[] {
+    return mergeDayStats(this.localDayStats(anchor), this.remoteDayStats(), this.deviceId());
+  }
+
+  /** 只算本机 review_log。同步上传 daily_stat 用它(Schema.projectDailyStats) */
+  localDayStats(anchor: number): DayStat[] {
     const rs = this.db().querySqlSync(SQL_DAY_STATS, [anchor]);
     const out: DayStat[] = [];
     try {
@@ -760,6 +950,55 @@ export class Database {
       rs.close();
     }
     return out;
+  }
+
+  /** 其他设备的每日汇总(同步下载后的本机缓存) */
+  remoteDayStats(): DailyStatRow[] {
+    const rs = this.db().querySqlSync(SQL_REMOTE_DAY_STATS);
+    const out: DailyStatRow[] = [];
+    try {
+      while (rs.goToNextRow()) {
+        out.push({
+          deviceId: rs.getString(rs.getColumnIndex('device_id')),
+          day: rs.getLong(rs.getColumnIndex('day')),
+          reps: rs.getLong(rs.getColumnIndex('reps')),
+          ms: rs.getLong(rs.getColumnIndex('ms')),
+        });
+      }
+    } finally {
+      rs.close();
+    }
+    return out;
+  }
+
+  /** 同步下载的其他设备汇总写进缓存 */
+  saveRemoteDayStats(rows: DailyStatRow[]): void {
+    for (const r of rows) {
+      this.db().executeSync(SQL_UPSERT_REMOTE_DAY_STAT,
+        [r.deviceId, r.day, r.reps, r.ms] as Array<relationalStore.ValueType>);
+    }
+  }
+
+  private cachedDeviceId: string = '';
+
+  /** 本机设备 id:第一次用到时生成随机 uuid 存进 meta,之后不变。不用任何硬件标识 */
+  deviceId(): string {
+    if (this.cachedDeviceId.length > 0) {
+      return this.cachedDeviceId;
+    }
+    const rs = this.db().querySqlSync(SQL_META_VALUE, [META_DEVICE_ID]);
+    try {
+      if (rs.goToFirstRow()) {
+        this.cachedDeviceId = rs.getString(rs.getColumnIndex('value'));
+      }
+    } finally {
+      rs.close();
+    }
+    if (this.cachedDeviceId.length === 0) {
+      this.cachedDeviceId = this.newUuid();
+      this.db().executeSync(SQL_META_SET, [META_DEVICE_ID, this.cachedDeviceId] as Array<relationalStore.ValueType>);
+    }
+    return this.cachedDeviceId;
   }
 
   /** 全量保持率。口径与 Schema.retentionOf() 相同,桌面测试盯住两者一致 */

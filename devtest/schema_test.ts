@@ -229,7 +229,7 @@ const fpA = fingerprintOf('DataStructure::Chapter_2', '基础选择 (1)', 0);
 
 check('同样输入得到同样指纹(确定性)',
   fpA === fingerprintOf('DataStructure::Chapter_2', '基础选择 (1)', 0), fpA);
-check('指纹是 8 位十六进制', /^[0-9a-f]{8}$/.test(fpA), fpA);
+check('指纹是 16 位十六进制(64 位,schema v2)', /^[0-9a-f]{16}$/.test(fpA), fpA);
 
 // 这三条决定了「什么算同一张卡」
 check('标题不同 -> 不同卡',

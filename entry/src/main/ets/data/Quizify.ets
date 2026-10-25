@@ -1,9 +1,11 @@
 /**
  * Quizify Card Markdown v1 解析器 —— **纯逻辑,不 import 任何 @kit.\* **。
  *
- * 规范:~/.kiro/skills/file-to-anki-deck/references/markdown-format.md
- * 对应 Anki 的 Quizify Markdown 插件(github.com/e-chehil/anki-quizify),
- * 所以卡组可以双向流动:已有的 Anki 卡组能导进来,REPS 的也能导回去。
+ * **兼容导入(ADR-0007):** 主格式已改为 REPS Card YAML v1(Yaml.ets)。这里保留是因为
+ * 用户的 PKB 是这个格式;导出一律写 YAML。解析器是自写的,没有使用 anki-quizify(AGPL-3.0)的代码。
+ *
+ * 语法参考:~/.kiro/skills/file-to-anki-deck/references/markdown-format.md
+ * (与 Anki 的 Quizify Markdown 插件同一套语法)。
  *
  * 结构:
  *   文件开头必须有 YAML front matter,声明 quizify.deck(用 :: 表示卡组嵌套)
@@ -58,6 +60,35 @@ export interface ParsedCard {
   index: number;
   /** 正面起始行号(1 基),报错时告诉用户去哪一行看 */
   line: number;
+  /**
+   * 文件里写的卡片固定身份(REPS YAML v1 的 `id`)。空串 = 文件里没写,导入时再生成。
+   * Quizify Markdown 没有这个概念,恒为空串。
+   */
+  id: string;
+  /** 这张卡自己的标签(v1 的卡片 `tags`)。Quizify 恒为空 */
+  tags: string[];
+}
+
+/** 牌组信息(REPS YAML v1 的 `meta` 块)。没写的字段是空串 / 0 */
+export interface DeckMeta {
+  /** 牌组固定身份 uuid */
+  id: string;
+  /** 作者每发布一次 +1;0 = 没写 */
+  version: number;
+  author: string;
+  language: string;
+  license: string;
+  description: string;
+  source: string;
+  /** manual / ai / ai+manual */
+  generatedBy: string;
+}
+
+export function emptyMeta(): DeckMeta {
+  return {
+    id: '', version: 0, author: '', language: '', license: '', description: '', source: '',
+    generatedBy: '',
+  };
 }
 
 /** 整份文件的解析结果 */
@@ -75,6 +106,8 @@ export interface ParsedDeck {
    */
   hadFrontMatter: boolean;
   cards: ParsedCard[];
+  /** v1 的 meta 块;Quizify 与旧 YAML 恒为 emptyMeta() */
+  meta: DeckMeta;
 }
 
 /**
@@ -671,6 +704,8 @@ export function parseQuizify(text: string, fallbackDeck?: string): ParsedDeck {
       type: type,
       index: cards.length,
       line: cardStartLine,
+      id: '',
+      tags: [],
     });
   };
 
@@ -748,6 +783,7 @@ export function parseQuizify(text: string, fallbackDeck?: string): ParsedDeck {
     format: fm.format,
     hadFrontMatter: fm.hadFrontMatter,
     cards: cards,
+    meta: emptyMeta(),
   };
 }
 

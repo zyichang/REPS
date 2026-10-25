@@ -65,9 +65,17 @@ const FILES = [
   ]],
   // 行内标记解析。ArkUI 的 Text 不认 Markdown,切片规则必须有断言兜住。
   [join(ets, 'data', 'Inline.ets'), join(here, 'Inline.ts'), []],
-  // YAML 子集导入。它只做「读键 + 拼成 Quizify 文本」,所以必须和 Quizify.ets
-  // 一起同步,否则 delegate 那一步解析不到模块。
-  [join(ets, 'data', 'Yaml.ets'), join(here, 'Yaml.ts'), []],
+  // YAML 卡组导入。v1 直接产出卡片;旧格式「拼成 Quizify 文本」再交给 Quizify.ets,
+  // 所以必须和 Quizify.ets 一起同步。
+  [join(ets, 'data', 'Yaml.ets'), join(here, 'Yaml.ts'), [
+    ["'../model/Models'", "'./Models'"],
+  ]],
+  // YAML 导出。export_test 把它的输出再交给 Yaml.ts 解析,断言往返一致
+  [join(ets, 'data', 'YamlExport.ets'), join(here, 'YamlExport.ts'), [
+    ["'../model/Models'", "'./Models'"],
+  ]],
+  // 同步核心(纯逻辑)。sync_test 用内存里的两台假设备 + 假云端驱动它
+  [join(ets, 'data', 'SyncCore.ets'), join(here, 'SyncCore.ts'), []],
 ];
 
 for (const [src, dst, subs] of FILES) {
@@ -104,6 +112,12 @@ const suites = [
   'history_test.ts',
   'checkin_test.ts',
   'import_test.ts',
+  'migration_test.ts',
+  'reimport_test.ts',
+  'export_test.ts',
+  'dailystat_test.ts',
+  'sync_test.ts',
+  'publish_test.ts',
 ];
 
 for (const suite of suites) {
