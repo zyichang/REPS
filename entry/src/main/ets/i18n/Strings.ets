@@ -169,6 +169,14 @@ export interface Dict {
   accountSwitchTitle: string;
   accountSwitchHint: string;
   accountSignOutHint: string;
+  /** 隐私政策与同意框(Task 13) */
+  privacyPolicy: string;
+  consentTitle: string;
+  consentBody: string;
+  consentRead: string;
+  consentDisagree: string;
+  consentAgree: string;
+  close: string;
   accountSyncNever: string;
   /** 上次同步的时刻 */
   accountSyncLast: string;
@@ -387,6 +395,15 @@ const ZH: Dict = {
   accountSwitchHint: '鸿蒙上的华为账号登录使用的是系统里登录的账号。要换成另一个华为账号:先在这里退出登录,'
     + '到系统「设置 → 华为账号」切换账号,再回来登录。不同账号的云端数据互不相通。',
   accountSignOutHint: '退出后,这台设备上的牌组、进度和打卡都还在,只是不再同步。',
+  privacyPolicy: '隐私政策',
+  consentTitle: '登录前请阅读隐私政策',
+  consentBody: '登录后,REPS 会把你的卡组文件、每张卡的学习进度、打卡日期,以及每天的作答次数和学习时长,'
+    + '同步到华为 AppGallery Connect 的云服务(中国境内),只用于在你自己的设备之间同步。'
+    + '不会收集手机号、通讯录、位置等信息,也不会上传逐条作答记录。不登录也能完整使用全部学习功能。',
+  consentRead: '查看全文',
+  consentDisagree: '不同意',
+  consentAgree: '同意并登录',
+  close: '关闭',
   accountSyncNever: '还没有同步过',
   accountSyncLast: '上次同步 %s',
   accountSyncNow: '立即同步',
@@ -556,6 +573,16 @@ const EN: Dict = {
   accountSwitchHint: 'HUAWEI ID sign-in uses the account signed in to the system. To use a different one: sign out here, '
     + 'switch accounts in Settings → HUAWEI ID, then sign in again. Different accounts never share cloud data.',
   accountSignOutHint: 'After signing out, your decks, progress and check-ins stay on this device; they just stop syncing.',
+  privacyPolicy: 'Privacy policy',
+  consentTitle: 'Please read the privacy policy before signing in',
+  consentBody: 'After you sign in, REPS syncs your deck files, each card\'s progress, check-in dates, and daily answer counts '
+    + 'and study time to HUAWEI AppGallery Connect cloud services (mainland China), only to sync between your own devices. '
+    + 'It never collects your phone number, contacts or location, and never uploads individual answers. '
+    + 'Every study feature works without signing in.',
+  consentRead: 'Read in full',
+  consentDisagree: 'Disagree',
+  consentAgree: 'Agree and sign in',
+  close: 'Close',
   accountSyncNever: 'Not synced yet',
   accountSyncLast: 'Last synced %s',
   accountSyncNow: 'Sync now',

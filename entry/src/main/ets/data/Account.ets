@@ -33,6 +33,12 @@ export const SK_AVATAR: string = 'reps_avatar';
 const PREF_FILE: string = 'reps_account';
 const PREF_NICK: string = 'nick';
 const PREF_AVATAR: string = 'avatar';
+const PREF_CONSENT: string = 'privacy_consent';
+/**
+ * 隐私政策版本(rawfile/privacy/*.html 的「版本」)。政策改了处理范围就加一,
+ * 用户下次登录前会再看一次同意框。
+ */
+export const PRIVACY_VERSION: string = '1';
 
 let configured: boolean = false;
 let prefs: preferences.Preferences | null = null;
@@ -64,6 +70,19 @@ export function initAccount(ctx: common.UIAbilityContext): void {
   }).catch((e: Error) => {
     hilog.warn(DOMAIN, TAG, '读账号资料失败:%{public}s', `${e}`);
   });
+}
+
+/** 用户是否同意过当前版本的隐私政策(第一次登录前必须同意) */
+export function hasPrivacyConsent(): boolean {
+  return prefs !== null && (prefs.getSync(PREF_CONSENT, '') as string) === PRIVACY_VERSION;
+}
+
+export function setPrivacyConsent(): void {
+  if (prefs !== null) {
+    prefs.putSync(PREF_CONSENT, PRIVACY_VERSION);
+    prefs.flush();
+  }
+  hilog.info(DOMAIN, TAG, '用户同意隐私政策 v%{public}s', PRIVACY_VERSION);
 }
 
 function saveProfile(nick: string, avatar: string): void {

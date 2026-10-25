@@ -28,11 +28,13 @@ import { getFsrsParams, setFsrsParams } from '../srs/Srs';
 import { L, LANG_EN, LANG_ZH, algoLabels, fmt } from '../i18n/Strings';
 import { BP_SM, MAX_COL, SIDE_W, SK_BP, isSplit } from './Layout';
 import {
-  SK_AVATAR, SK_NICK, SK_UID, accountConfigured, fetchProfile, maskUid, signInHuawei, signOut,
+  SK_AVATAR, SK_NICK, SK_UID, accountConfigured, fetchProfile, hasPrivacyConsent, maskUid, setPrivacyConsent,
+  signInHuawei, signOut,
 } from '../data/Account';
 import { common } from '@kit.AbilityKit';
 import { SK_SYNC_AT, SK_SYNC_ERROR, SK_SYNC_RUNNING, loadSyncStatus, syncNow } from '../data/SyncService';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { webview } from '@kit.ArkWeb';
 
 /** 根页面显示哪一层。0 是菜单本身 */
 enum Sub {
@@ -95,6 +97,9 @@ export struct ProfilePage {
   @StorageLink(SK_SYNC_RUNNING) syncRunning: boolean = false;
   @State private accountBusy: boolean = false;
   @State private accountMsg: string = '';
+  /** 隐私政策全文(全屏,rawfile/privacy/*.html) */
+  @State private showPolicy: boolean = false;
+  private policyWeb: webview.WebviewController = new webview.WebviewController();
 
   aboutToAppear(): void {
     this.pull();
@@ -151,12 +156,38 @@ export struct ProfilePage {
 
   // ---------------- 账号(可选,Task 10) ----------------
 
+  /**
+   * 第一次登录前的同意框(Task 13)。**不同意就不登录**,App 照常本地使用。
+   * 同意记在 Account 的 preferences 里,按政策版本号;政策改了处理范围就加版本,会再问一次。
+   */
+  private askConsentThenSignIn(): void {
+    this.getUIContext().showAlertDialog({
+      title: L(this.lang).consentTitle,
+      message: L(this.lang).consentBody,
+      autoCancel: false,
+      buttons: [
+        { value: L(this.lang).consentRead, fontColor: '#2563EB', action: () => { this.showPolicy = true; } },
+        { value: L(this.lang).consentDisagree, fontColor: '#8A8A8E', action: () => {} },
+        {
+          value: L(this.lang).consentAgree, fontColor: '#2563EB', action: () => {
+            setPrivacyConsent();
+            this.doSignIn();
+          },
+        },
+      ],
+    });
+  }
+
   private async doSignIn(): Promise<void> {
     if (this.accountBusy) {
       return;
     }
     if (!accountConfigured()) {
       this.accountMsg = L(this.lang).accountUnavailable;
+      return;
+    }
+    if (!hasPrivacyConsent()) {
+      this.askConsentThenSignIn();
       return;
     }
     this.accountBusy = true;
@@ -524,6 +555,7 @@ export struct ProfilePage {
         .align(Alignment.Top)
       }
       .width('100%').height('100%').backgroundColor('#FFFFFF')
+      .bindContentCover($$this.showPolicy, this.policyCover(), { modalTransition: ModalTransition.DEFAULT })
     } else {
       Scroll() {
         this.currentBody()
@@ -532,6 +564,7 @@ export struct ProfilePage {
       .scrollable(ScrollDirection.Vertical)
       .scrollBar(BarState.Auto)
       .edgeEffect(EdgeEffect.Spring)
+      .bindContentCover($$this.showPolicy, this.policyCover(), { modalTransition: ModalTransition.DEFAULT })
     }
   }
 
@@ -577,6 +610,8 @@ export struct ProfilePage {
       if (this.uid.length === 0) {
         Text(L(this.lang).accountSignedOut).fontSize(15).width('100%')
         Text(L(this.lang).accountHint).fontSize(11).fontColor('#8A8A8E').width('100%')
+        Text(L(this.lang).privacyPolicy).fontSize(11).fontColor('#2563EB')
+          .onClick(() => { this.showPolicy = true; })
         Button(this.accountBusy ? L(this.lang).accountWorking : L(this.lang).accountSignIn)
           .width('100%').height(40).fontSize(15).backgroundColor('#3B82F6').margin({ top: 4 })
           .enabled(!this.accountBusy)
@@ -605,6 +640,26 @@ export struct ProfilePage {
         this.enter(Sub.Account);
       }
     })
+  }
+
+  /** 隐私政策全文,全屏盖在页面上。中文界面看中文版,其余英文版 */
+  @Builder
+  policyCover() {
+    Column() {
+      Row() {
+        Text(L(this.lang).privacyPolicy).fontSize(18).fontWeight(FontWeight.Medium).layoutWeight(1)
+        Text(L(this.lang).close).fontSize(15).fontColor('#2563EB').padding(8)
+          .onClick(() => { this.showPolicy = false; })
+      }
+      .width('100%').padding({ left: 20, right: 12, top: 12, bottom: 8 })
+      Web({
+        src: this.lang === LANG_ZH ? $rawfile('privacy/zh.html') : $rawfile('privacy/en.html'),
+        controller: this.policyWeb,
+      })
+        .layoutWeight(1).width('100%')
+    }
+    .width('100%').height('100%').backgroundColor('#FFFFFF')
+    .padding({ top: 30 })
   }
 
   /** 「上次同步 10-25 23:40」/「还没有同步过」 */
@@ -685,6 +740,14 @@ export struct ProfilePage {
         Text(L(this.lang).accountSyncHint).fontSize(11).fontColor('#B0B7C3').width('100%')
       }
       .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
+
+      // ---- 隐私政策 ----
+      Row() {
+        Text(L(this.lang).privacyPolicy).fontSize(15).layoutWeight(1)
+        Text('›').fontSize(22).fontColor('#C2C8D2')
+      }
+      .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
+      .onClick(() => { this.showPolicy = true; })
 
       // ---- 切换账号:鸿蒙上华为账号登录用的是系统里登录的那个账号 ----
       Column({ space: 4 }) {
