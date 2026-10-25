@@ -17,7 +17,7 @@ REPS 想把这条链路做成普通人愿意每天打开的样子。
 
 ## 当前版本
 
-**v1.0.0(2026-10-26,自用稳定版)**:功能清单见 README 的 Status。之后每次发布改 `AppScope/app.json5` 的
+**v1.0.3(2026-10-26,自用稳定版;versionCode 1000003)**:功能清单见 README 的 Status。之后每次发布改 `AppScope/app.json5` 的
 `versionName`,`versionCode` 只增不减(1.0.0 = 1000000;上传应用市场前必须比上一次大)。
 
 ## 已经定下的决定
