@@ -65,7 +65,7 @@ export interface ParsedCard {
    * Quizify Markdown 没有这个概念,恒为空串。
    */
   id: string;
-  /** 这张卡自己的标签(v1 的卡片 `tags`)。Quizify 恒为空 */
+  /** 这张卡自己的标签(v1 的卡片 `tags`;Quizify 取自卡片开头的 `<!-- quizify-card -->` 注释) */
   tags: string[];
 }
 
@@ -363,6 +363,64 @@ export function extractChoiceBlock(front: string): ChoiceBlock {
 }
 
 /** 去掉首尾空行,但保留内部换行(正文的排版是有意义的) */
+/** 卡片开头那段 `<!-- quizify-card … -->` 注释里读到的东西 */
+interface CardMeta {
+  /** 注释之后正文从第几行起(相对 frontLines);没有注释就是 0 */
+  bodyStart: number;
+  tags: string[];
+  /** `draft: true`:草稿卡,不导入 */
+  draft: boolean;
+}
+
+/**
+ * 剥掉正面开头的 Quizify 卡片元数据注释,读出其中的 tags 与 draft:
+ *
+ *   <!-- quizify-card
+ *   tags: [a, b]
+ *   draft: false
+ *   -->
+ *
+ * 只认正面第一段非空内容,别处的 HTML 注释原样保留。注释没闭合就报错,
+ * 不然后面整张卡都会被当成注释吞掉。
+ */
+function readCardMeta(lines: string[], startLine: number): CardMeta {
+  const none: CardMeta = { bodyStart: 0, tags: [], draft: false };
+  let a = 0;
+  while (a < lines.length && lines[a].trim().length === 0) {
+    a++;
+  }
+  if (a >= lines.length || !lines[a].trim().startsWith('<!-- quizify-card')) {
+    return none;
+  }
+  const meta: CardMeta = { bodyStart: 0, tags: [], draft: false };
+  for (let i = a; i < lines.length; i++) {
+    let t = lines[i].trim();
+    if (i === a) {
+      t = t.substring('<!-- quizify-card'.length).trim();
+    }
+    const closed = t.endsWith('-->');
+    if (closed) {
+      t = t.substring(0, t.length - 3).trim();
+    }
+    const colon = t.indexOf(':');
+    if (colon > 0) {
+      const key = t.substring(0, colon).trim();
+      const value = t.substring(colon + 1).trim();
+      if (key === 'tags') {
+        meta.tags = parseList(value);
+      } else if (key === 'draft') {
+        meta.draft = value.toLowerCase() === 'true';
+      }
+    }
+    if (closed) {
+      meta.bodyStart = i + 1;
+      return meta;
+    }
+  }
+  throw new QuizifyError(m('卡片开头的 <!-- quizify-card 注释没有用 --> 闭合',
+    'The <!-- quizify-card comment at the start of this card is not closed with -->'), startLine);
+}
+
 function trimBlankEdges(lines: string[]): string {
   let a = 0;
   let b = lines.length;
@@ -666,7 +724,8 @@ export function parseQuizify(text: string, fallbackDeck?: string): ParsedDeck {
   let inMath = false;
 
   const flush = (endLine: number): void => {
-    const front = trimBlankEdges(frontLines);
+    const meta: CardMeta = readCardMeta(frontLines, cardStartLine);
+    const front = trimBlankEdges(frontLines.slice(meta.bodyStart));
     if (front.length === 0) {
       throw new QuizifyError(m('这张卡的正面是空的', 'This card has an empty front'), cardStartLine);
     }
@@ -686,6 +745,9 @@ export function parseQuizify(text: string, fallbackDeck?: string): ParsedDeck {
 
     // 题型判定的优先级:选择题 > 完形填空 > 问答。
     // 一张卡同时有 ;;; 和 {{}} 时按选择题处理 —— 选项已经把答案结构化了。
+    if (meta.draft) {
+      return;
+    }
     let type: NoteType = NoteType.QA;
     if (choice.found) {
       type = NoteType.Choice;
@@ -705,7 +767,7 @@ export function parseQuizify(text: string, fallbackDeck?: string): ParsedDeck {
       index: cards.length,
       line: cardStartLine,
       id: '',
-      tags: [],
+      tags: meta.tags,
     });
   };
 

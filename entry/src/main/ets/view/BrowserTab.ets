@@ -193,6 +193,13 @@ export struct BrowserTab {
       this.gen++;
       this.source.setData(this.rows);
       this.status = '';
+      // 右栏 / 预览页里那张卡被删了(删牌组、删卡、同步删除):关掉,别显示一张已经不存在的卡
+      if (this.openCard !== 0 && db.loadReviewCard(this.openCard) === null) {
+        this.stack.clear(false);
+        this.openCard = 0;
+      }
+      // 右栏空着(刚删光、刚从空库导入):补上第一张
+      this.autoPreview();
     } catch (e) {
       this.status = fmt(L(this.lang).readFailed, `${e}`);
       hilog.error(DOMAIN, TAG, '浏览查询失败 %{public}s', `${e}`);

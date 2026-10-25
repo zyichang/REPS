@@ -426,5 +426,20 @@ const tailBreak: ParsedDeck = parseQuizify(
   `+++\n\n题干\n\n;;;\nA. 甲\nB. 乙\n;;;A\\\n***\n甲\n`, 'x');
 check('收尾行 `;;;A\\` 也能取到答案', tailBreak.cards[0].answer === 'A', tailBreak.cards[0].answer);
 
+// 卡片开头的 <!-- quizify-card --> 元数据注释:剥掉,不能当正文显示(真机上看到整段注释露在正面)
+const withMeta: ParsedDeck = parseQuizify(
+  `+++\n<!-- quizify-card\ntags: [集成电路, added::2026-08-06]\n-->\n\n#### 1. 问题\n\n***\n答案\n` +
+  `+++\n<!-- quizify-card\ndraft: true\n-->\n#### 2. 草稿\n***\n不导入\n` +
+  `+++\n#### 3. 正文里的注释保留\n<!-- 备注 -->\n***\n答\n`, 'x');
+check('quizify-card 注释不进正面', !withMeta.cards[0].front.includes('quizify-card'),
+  JSON.stringify(withMeta.cards[0].front));
+check('剥掉注释后标题照常取到', withMeta.cards[0].title === '1. 问题', withMeta.cards[0].title);
+check('注释里的 tags 读出来了', withMeta.cards[0].tags.join('|') === '集成电路|added::2026-08-06',
+  withMeta.cards[0].tags.join('|'));
+check('draft: true 的卡不导入', withMeta.cards.length === 2 && withMeta.cards[1].title.startsWith('3.'),
+  `${withMeta.cards.length} 张`);
+check('不在开头的普通注释原样保留', withMeta.cards[1].front.includes('<!-- 备注 -->'));
+expectError('quizify-card 注释没闭合要报错', `---\nquizify:\n  deck: x\n---\n+++\n<!-- quizify-card\ntags: [a]\n#### 1. 问\n***\n答\n`, '没有用 --> 闭合');
+
 console.log(`\n===== 结果: ${pass} 通过 / ${fail} 失败 =====`);
 process.exit(fail === 0 ? 0 : 1);
