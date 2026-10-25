@@ -27,7 +27,10 @@ import {
 import { getFsrsParams, setFsrsParams } from '../srs/Srs';
 import { L, LANG_EN, LANG_ZH, algoLabels, fmt } from '../i18n/Strings';
 import { BP_SM, MAX_COL, SIDE_W, SK_BP, isSplit } from './Layout';
-import { SK_UID, accountConfigured, maskUid, signInHuawei, signOut } from '../data/Account';
+import {
+  SK_AVATAR, SK_NICK, SK_UID, accountConfigured, fetchProfile, maskUid, signInHuawei, signOut,
+} from '../data/Account';
+import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 
 /** 根页面显示哪一层。0 是菜单本身 */
@@ -38,6 +41,8 @@ enum Sub {
   SetParams = 2,
   Format = 3,
   Language = 4,
+  /** 账号管理(Task 16):头像昵称、退出、切换账号说明 */
+  Account = 5,
 }
 
 /** 四个走滚轮的数字设置 */
@@ -82,6 +87,8 @@ export struct ProfilePage {
   @StorageLink(SK_BP) @Watch('onBreakpoint') bp: string = BP_SM;
   /** 当前登录的 uid(Account.ets 写),空串 = 没登录 */
   @StorageLink(SK_UID) uid: string = '';
+  @StorageLink(SK_NICK) nick: string = '';
+  @StorageLink(SK_AVATAR) avatar: string = '';
   @State private accountBusy: boolean = false;
   @State private accountMsg: string = '';
 
@@ -163,6 +170,25 @@ export struct ProfilePage {
     }
   }
 
+  /** 取华为账号头像与昵称(会弹一次授权页) */
+  private async doFetchProfile(): Promise<void> {
+    if (this.accountBusy) {
+      return;
+    }
+    this.accountBusy = true;
+    this.accountMsg = '';
+    try {
+      await fetchProfile(this.getUIContext().getHostContext() as common.UIAbilityContext);
+    } catch (e) {
+      const be = e as BusinessError;
+      if (be.code !== 1001502012) {
+        this.accountMsg = fmt(L(this.lang).accountFailed, `${be.code ?? ''} ${be.message ?? e}`);
+      }
+    } finally {
+      this.accountBusy = false;
+    }
+  }
+
   private async doSignOut(): Promise<void> {
     if (this.accountBusy) {
       return;
@@ -171,6 +197,7 @@ export struct ProfilePage {
     this.accountMsg = '';
     try {
       await signOut();
+      this.enter(Sub.Root);
     } catch (e) {
       this.accountMsg = fmt(L(this.lang).accountFailed, `${e}`);
     } finally {
@@ -319,6 +346,9 @@ export struct ProfilePage {
     }
     if (section === Sub.Format) {
       return L(this.lang).formatSection;
+    }
+    if (section === Sub.Account) {
+      return L(this.lang).accountTitle;
     }
     return L(this.lang).langSection;
   }
@@ -507,6 +537,8 @@ export struct ProfilePage {
       this.formatBody()
     } else if (this.detailSub() === Sub.Language) {
       this.langBody()
+    } else if (this.detailSub() === Sub.Account && this.uid.length > 0) {
+      this.accountBody()
     } else {
       this.algoBody()
     }
@@ -523,6 +555,8 @@ export struct ProfilePage {
       this.formatBody()
     } else if (this.sub === Sub.Language) {
       this.langBody()
+    } else if (this.sub === Sub.Account && this.uid.length > 0) {
+      this.accountBody()
     } else {
       this.menuBody()
     }
@@ -541,20 +575,103 @@ export struct ProfilePage {
           .enabled(!this.accountBusy)
           .onClick(() => { this.doSignIn(); })
       } else {
-        Text(fmt(L(this.lang).accountSignedIn, maskUid(this.uid))).fontSize(15).width('100%')
-        Text(L(this.lang).accountSyncHint).fontSize(11).fontColor('#8A8A8E').width('100%')
-        Button(L(this.lang).accountSignOut)
-          .width('100%').height(40).fontSize(15).fontColor('#E5544B')
-          .backgroundColor('#FFFFFF').borderWidth(1).borderColor('#E5E5EA').margin({ top: 4 })
-          .enabled(!this.accountBusy)
-          .onClick(() => { this.doSignOut(); })
+        Row({ space: 12 }) {
+          this.avatarView(44)
+          Column({ space: 3 }) {
+            Text(this.displayName()).fontSize(15).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text(L(this.lang).accountManage).fontSize(11).fontColor('#8A8A8E')
+          }
+          .alignItems(HorizontalAlign.Start).layoutWeight(1)
+          Text('›').fontSize(22).fontColor('#C2C8D2')
+        }
+        .width('100%')
       }
-      if (this.accountMsg.length > 0) {
+      if (this.accountMsg.length > 0 && this.uid.length === 0) {
         Text(this.accountMsg).fontSize(11).fontColor('#E5544B').width('100%')
       }
     }
-    .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
+    .width('100%').padding(14).borderRadius(12)
+    .backgroundColor(this.uid.length > 0 && isSplit(this.bp) && this.detailSub() === Sub.Account ? '#EAF1FE' : '#FAFAFC')
     .alignItems(HorizontalAlign.Start)
+    .onClick(() => {
+      if (this.uid.length > 0) {
+        this.enter(Sub.Account);
+      }
+    })
+  }
+
+  /** 昵称;没授权过就是「华为账号用户」 */
+  private displayName(): string {
+    return this.nick.length > 0 ? this.nick : L(this.lang).accountDefaultName;
+  }
+
+  /** 头像:有授权用华为账号头像,否则一个蓝底圆形加昵称首字(或人形符号) */
+  @Builder
+  avatarView(size: number) {
+    if (this.avatar.length > 0) {
+      Image(this.avatar).width(size).height(size).borderRadius(size / 2).objectFit(ImageFit.Cover)
+    } else {
+      Stack() {
+        if (this.nick.length > 0) {
+          Text(this.nick.substring(0, 1)).fontSize(size * 0.42).fontColor('#FFFFFF').fontWeight(FontWeight.Medium)
+        } else {
+          SymbolGlyph($r('sys.symbol.person')).fontSize(size * 0.5).fontColor(['#FFFFFF'])
+        }
+      }
+      .width(size).height(size).borderRadius(size / 2)
+      .linearGradient({ angle: 135, colors: [['#22D3EE', 0], ['#2563EB', 1]] })
+    }
+  }
+
+  /** 账号子页(Task 16 前半) */
+  @Builder
+  accountBody() {
+    Column({ space: 12 }) {
+      this.subHeader(Sub.Account)
+
+      // ---- 头部 ----
+      Column({ space: 8 }) {
+        this.avatarView(72)
+        Text(this.displayName()).fontSize(19).fontWeight(FontWeight.Medium)
+        Text(fmt(L(this.lang).accountUidLine, maskUid(this.uid))).fontSize(12).fontColor('#8A8A8E')
+        if (this.nick.length === 0 && this.avatar.length === 0) {
+          Button(this.accountBusy ? L(this.lang).accountWorking : L(this.lang).accountFetchProfile)
+            .height(34).fontSize(13).fontColor('#2563EB').backgroundColor('#EAF1FE').margin({ top: 4 })
+            .enabled(!this.accountBusy)
+            .onClick(() => { this.doFetchProfile(); })
+          Text(L(this.lang).accountProfileHint).fontSize(11).fontColor('#B0B7C3')
+            .textAlign(TextAlign.Center).width('100%')
+        }
+      }
+      .width('100%').padding({ top: 18, bottom: 18 }).borderRadius(12).backgroundColor('#FAFAFC')
+
+      // ---- 同步 ----
+      Column({ space: 4 }) {
+        Text(L(this.lang).accountSyncTitle).fontSize(15).fontWeight(FontWeight.Medium).width('100%')
+        Text(L(this.lang).accountSyncHint).fontSize(11).fontColor('#8A8A8E').width('100%')
+      }
+      .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
+
+      // ---- 切换账号:鸿蒙上华为账号登录用的是系统里登录的那个账号 ----
+      Column({ space: 4 }) {
+        Text(L(this.lang).accountSwitchTitle).fontSize(15).fontWeight(FontWeight.Medium).width('100%')
+        Text(L(this.lang).accountSwitchHint).fontSize(11).fontColor('#8A8A8E').width('100%')
+      }
+      .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
+
+      if (this.accountMsg.length > 0) {
+        Text(this.accountMsg).fontSize(11).fontColor('#E5544B').width('100%')
+      }
+
+      Button(L(this.lang).accountSignOut)
+        .width('100%').height(44).fontSize(15).fontColor('#E5544B')
+        .backgroundColor('#FFFFFF').borderWidth(1).borderColor('#E5E5EA')
+        .enabled(!this.accountBusy)
+        .onClick(() => { this.doSignOut(); })
+      Text(L(this.lang).accountSignOutHint).fontSize(11).fontColor('#B0B7C3').width('100%')
+    }
+    .width('90%').padding({ bottom: 20 })
+    .constraintSize({ maxWidth: MAX_COL })
   }
 
   /** 根菜单 */

@@ -13,7 +13,9 @@
  * 登录要求:AGC 里登记了签名证书的 SHA-256 指纹,否则报 1001500001(见 CONTEXT.md)。
  */
 import auth, { AuthUser, SignInResult } from '@hw-agconnect/auth';
+import { authentication } from '@kit.AccountKit';
 import { common } from '@kit.AbilityKit';
+import { preferences } from '@kit.ArkData';
 import { buffer } from '@kit.ArkTS';
 import { cloudCommon } from '@kit.CloudFoundationKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -24,8 +26,16 @@ const CONFIG_FILE: string = 'agconnect-services.json';
 
 /** AppStorage:当前登录用户的 uid,未登录为空串 */
 export const SK_UID: string = 'reps_uid';
+/** AppStorage:华为账号昵称 / 头像地址(用户授权 profile 之后才有,只存本机,不上云) */
+export const SK_NICK: string = 'reps_nick';
+export const SK_AVATAR: string = 'reps_avatar';
+
+const PREF_FILE: string = 'reps_account';
+const PREF_NICK: string = 'nick';
+const PREF_AVATAR: string = 'avatar';
 
 let configured: boolean = false;
+let prefs: preferences.Preferences | null = null;
 
 /** EntryAbility.onCreate 里调一次 */
 export function initAccount(ctx: common.UIAbilityContext): void {
@@ -44,7 +54,44 @@ export function initAccount(ctx: common.UIAbilityContext): void {
     hilog.error(DOMAIN, TAG, '初始化失败(缺 %{public}s?):%{public}s', CONFIG_FILE, `${e}`);
   }
   AppStorage.setOrCreate<string>(SK_UID, '');
+  AppStorage.setOrCreate<string>(SK_NICK, '');
+  AppStorage.setOrCreate<string>(SK_AVATAR, '');
   refreshUid();
+  preferences.getPreferences(ctx, PREF_FILE).then((p: preferences.Preferences) => {
+    prefs = p;
+    AppStorage.setOrCreate<string>(SK_NICK, p.getSync(PREF_NICK, '') as string);
+    AppStorage.setOrCreate<string>(SK_AVATAR, p.getSync(PREF_AVATAR, '') as string);
+  }).catch((e: Error) => {
+    hilog.warn(DOMAIN, TAG, '读账号资料失败:%{public}s', `${e}`);
+  });
+}
+
+function saveProfile(nick: string, avatar: string): void {
+  AppStorage.setOrCreate<string>(SK_NICK, nick);
+  AppStorage.setOrCreate<string>(SK_AVATAR, avatar);
+  if (prefs !== null) {
+    prefs.putSync(PREF_NICK, nick);
+    prefs.putSync(PREF_AVATAR, avatar);
+    prefs.flush();
+  }
+}
+
+/**
+ * 取华为账号的昵称与头像(Account Kit 的 profile 范围)。**第一次会弹授权页**,用户可以拒绝;
+ * 拒绝时抛错,界面退回显示打码 uid。只存本机,不上传。
+ */
+export async function fetchProfile(ctx: common.UIAbilityContext): Promise<void> {
+  const req: authentication.AuthorizationWithHuaweiIDRequest =
+    new authentication.HuaweiIDProvider().createAuthorizationWithHuaweiIDRequest();
+  req.scopes = ['profile'];
+  req.forceAuthorization = true;
+  const controller: authentication.AuthenticationController = new authentication.AuthenticationController(ctx);
+  const resp = await controller.executeRequest(req) as authentication.AuthorizationWithHuaweiIDResponse;
+  const nick: string = resp.data?.nickName ?? '';
+  const avatar: string = resp.data?.avatarUri ?? '';
+  saveProfile(nick, avatar);
+  hilog.info(DOMAIN, TAG, '已取得账号资料(昵称 %{public}s,头像 %{public}s)', nick.length > 0 ? '有' : '无',
+    avatar.length > 0 ? '有' : '无');
 }
 
 /** 认证服务能不能用(配置文件在不在) */
@@ -82,6 +129,7 @@ export async function signOut(): Promise<void> {
     await auth.signOut();
   }
   AppStorage.setOrCreate<string>(SK_UID, '');
+  saveProfile('', '');
   hilog.info(DOMAIN, TAG, '已退出');
 }
 
