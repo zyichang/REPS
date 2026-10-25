@@ -12,12 +12,16 @@
     "installationFree": false,
     "pages": "$profile:main_pages",
     /*
-     * 故意不申请任何权限。
-     *
-     * REPS 是纯本地应用:卡片来自用户自己的文件,排期算在设备上,数据库在沙箱里。
-     * 一旦将来要做同步(见 CONTEXT.md 的 Task 14),再按需加 ohos.permission.INTERNET。
-     * 在此之前「零权限」本身就是产品承诺的一部分。
+     * 只申请 INTERNET(system_grant,不弹窗):可选的华为账号登录与云同步要联网(ADR-0006)。
+     * 不登录时 App 不发任何请求,学习数据只在本机。
      */
+    "requestPermissions": [
+      { "name": "ohos.permission.INTERNET" }
+    ],
+    /* Account Kit 的 client_id(= agconnect-services.json 里 oauth_client.client_id,不是密钥) */
+    "metadata": [
+      { "name": "client_id", "value": "6917619109853222921" }
+    ],
     "abilities": [
       {
         "name": "EntryAbility",

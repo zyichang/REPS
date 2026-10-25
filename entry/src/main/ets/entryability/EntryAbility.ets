@@ -3,6 +3,7 @@ import { appStore } from '../store/AppStore';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { KeyboardAvoidMode, window } from '@kit.ArkUI';
 import { SK_BP, breakpointOf } from '../view/Layout';
+import { initAccount } from '../data/Account';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'REPS';
@@ -10,6 +11,8 @@ const TAG: string = 'REPS';
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, 'EntryAbility onCreate');
+    // 可选的华为账号 + 云服务(ADR-0006)。失败只记日志,不影响本地使用
+    initAccount(this.context);
   }
 
   /** 系统语言等配置变了。语言设为「跟随系统」时界面要跟着换 */

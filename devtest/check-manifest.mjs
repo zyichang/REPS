@@ -157,9 +157,11 @@ for (const mf of manifests) {
 }
 check('清单里确实有资源引用被检查到', refs >= 6, `${refs} 处`);
 
-// REPS 是纯本地应用:不申请任何权限本身就是产品承诺,所以这里反向断言。
+// 权限承诺(ADR-0006 起):**只有 INTERNET**(system_grant,不弹窗),给可选的华为账号与云同步用。
+// 任何会弹窗的 user_grant 权限(相机、位置、相册…)都不该出现 —— 这里反向断言。
 const perms = (moduleJson.module?.requestPermissions ?? []).map((p) => p.name);
-check('未申请任何权限(纯本地应用)', perms.length === 0, perms.length ? perms.join(', ') : '零权限');
+check('只申请 INTERNET(可选登录与云同步),没有任何会弹窗的权限',
+  perms.length === 1 && perms[0] === 'ohos.permission.INTERNET', perms.length ? perms.join(', ') : '零权限');
 
 // ---------------------------------------------------------------- 4. 模块声明一致
 console.log('=== 4. build-profile.json5 的模块声明 ===');

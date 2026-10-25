@@ -39,3 +39,6 @@ Thumbs.db
 # Kiro 的会话导出文件。不是源码,而且会长到几十 MB。
 REPS.json
 *.kiro-session.json
+
+# AGC 配置:含 client_secret / api_key,不进版本库。每台开发机从 AGC 控制台下载放到这里
+/entry/src/main/resources/rawfile/agconnect-services.json

@@ -27,6 +27,8 @@ import {
 import { getFsrsParams, setFsrsParams } from '../srs/Srs';
 import { L, LANG_EN, LANG_ZH, algoLabels, fmt } from '../i18n/Strings';
 import { BP_SM, MAX_COL, SIDE_W, SK_BP, isSplit } from './Layout';
+import { SK_UID, accountConfigured, maskUid, signInHuawei, signOut } from '../data/Account';
+import { BusinessError } from '@kit.BasicServicesKit';
 
 /** 根页面显示哪一层。0 是菜单本身 */
 enum Sub {
@@ -78,6 +80,10 @@ export struct ProfilePage {
    * 没选过就显示第一节(排期算法)。分栏时没有「返回上一层」,子页标题也不画 `‹`。
    */
   @StorageLink(SK_BP) @Watch('onBreakpoint') bp: string = BP_SM;
+  /** 当前登录的 uid(Account.ets 写),空串 = 没登录 */
+  @StorageLink(SK_UID) uid: string = '';
+  @State private accountBusy: boolean = false;
+  @State private accountMsg: string = '';
 
   aboutToAppear(): void {
     this.pull();
@@ -130,6 +136,46 @@ export struct ProfilePage {
     this.autoNext = st.autoNext;
     this.browsePage = st.browsePage;
     this.langMode = st.langMode;
+  }
+
+  // ---------------- 账号(可选,Task 10) ----------------
+
+  private async doSignIn(): Promise<void> {
+    if (this.accountBusy) {
+      return;
+    }
+    if (!accountConfigured()) {
+      this.accountMsg = L(this.lang).accountUnavailable;
+      return;
+    }
+    this.accountBusy = true;
+    this.accountMsg = '';
+    try {
+      await signInHuawei();
+    } catch (e) {
+      const be = e as BusinessError;
+      // 用户自己取消不算错误,什么都不说
+      if (be.code !== 1001502012) {
+        this.accountMsg = fmt(L(this.lang).accountFailed, `${be.code ?? ''} ${be.message ?? e}`);
+      }
+    } finally {
+      this.accountBusy = false;
+    }
+  }
+
+  private async doSignOut(): Promise<void> {
+    if (this.accountBusy) {
+      return;
+    }
+    this.accountBusy = true;
+    this.accountMsg = '';
+    try {
+      await signOut();
+    } catch (e) {
+      this.accountMsg = fmt(L(this.lang).accountFailed, `${e}`);
+    } finally {
+      this.accountBusy = false;
+    }
   }
 
   private pickAlgo(which: number): void {
@@ -482,12 +528,43 @@ export struct ProfilePage {
     }
   }
 
+  /** 账号卡片。不带参数,内容全在内部从状态里取(见 CONTEXT.md 的 @Builder 陷阱) */
+  @Builder
+  accountCard() {
+    Column({ space: 6 }) {
+      Text(L(this.lang).accountSection).fontSize(13).fontColor('#8A8A8E').width('100%')
+      if (this.uid.length === 0) {
+        Text(L(this.lang).accountSignedOut).fontSize(15).width('100%')
+        Text(L(this.lang).accountHint).fontSize(11).fontColor('#8A8A8E').width('100%')
+        Button(this.accountBusy ? L(this.lang).accountWorking : L(this.lang).accountSignIn)
+          .width('100%').height(40).fontSize(15).backgroundColor('#3B82F6').margin({ top: 4 })
+          .enabled(!this.accountBusy)
+          .onClick(() => { this.doSignIn(); })
+      } else {
+        Text(fmt(L(this.lang).accountSignedIn, maskUid(this.uid))).fontSize(15).width('100%')
+        Text(L(this.lang).accountSyncHint).fontSize(11).fontColor('#8A8A8E').width('100%')
+        Button(L(this.lang).accountSignOut)
+          .width('100%').height(40).fontSize(15).fontColor('#E5544B')
+          .backgroundColor('#FFFFFF').borderWidth(1).borderColor('#E5E5EA').margin({ top: 4 })
+          .enabled(!this.accountBusy)
+          .onClick(() => { this.doSignOut(); })
+      }
+      if (this.accountMsg.length > 0) {
+        Text(this.accountMsg).fontSize(11).fontColor('#E5544B').width('100%')
+      }
+    }
+    .width('100%').padding(14).borderRadius(12).backgroundColor('#FAFAFC')
+    .alignItems(HorizontalAlign.Start)
+  }
+
   /** 根菜单 */
   @Builder
   menuBody() {
     Column({ space: 12 }) {
       Text(L(this.lang).meTitle).fontSize(24).fontWeight(FontWeight.Bold)
         .width('100%').margin({ top: 14 })
+
+      this.accountCard()
 
       this.entryRow(Sub.Algo)
       this.entryRow(Sub.Language)

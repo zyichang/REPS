@@ -144,6 +144,19 @@ export interface Dict {
   formatMarkdown: string;
   formatYaml: string;
   formatAnki: string;
+  /** 账号卡片(Task 10) */
+  accountSection: string;
+  accountSignedOut: string;
+  accountHint: string;
+  accountSignIn: string;
+  accountWorking: string;
+  /** 已登录:打码后的 uid */
+  accountSignedIn: string;
+  accountSyncHint: string;
+  accountSignOut: string;
+  /** 登录 / 退出失败:原因 */
+  accountFailed: string;
+  accountUnavailable: string;
   aboutSection: string;
   aboutTagline: string;
   aboutLocal: string;
@@ -334,10 +347,20 @@ const ZH: Dict = {
   formatYaml: 'YAML:开头写 reps: 1,再写 deck 和 cards;每张卡有 type(qa / choice / cloze)、'
     + 'front、back,选择题用 options 列选项、answer 写答案字母。文字必须用引号或 | 块。',
   formatAnki: '与 Anki 的 Quizify Markdown 插件同一套语法,所以卡组可以双向流动。',
+  accountSection: '账号(可选)',
+  accountSignedOut: '未登录 —— 数据只在这台设备上',
+  accountHint: '用华为账号登录后,打卡、学习进度和牌组可以在你的手机、平板之间同步。不登录也能完整使用。',
+  accountSignIn: '使用华为账号登录',
+  accountWorking: '请稍候…',
+  accountSignedIn: '已登录 · %s',
+  accountSyncHint: '多设备同步即将上线。退出登录不会删除本机的任何数据。',
+  accountSignOut: '退出登录',
+  accountFailed: '操作失败:%s',
+  accountUnavailable: '这个版本没有配置华为账号服务(缺少 agconnect-services.json)',
   aboutSection: '关于',
   aboutTagline: '一天的学习量是 a set,一次作答是 a rep。',
-  aboutLocal: '纯本地运行,不申请任何权限。卡片来自你自己的文件,'
-    + '排期算在设备上,数据库在应用沙箱里。',
+  aboutLocal: '本地优先:卡片来自你自己的文件,排期算在设备上,数据库在应用沙箱里。'
+    + '只有登录华为账号后才会联网同步;不登录不发任何请求。',
 
  dontKnow: '不知道', nextOne: '下一个',
   correctTitle: '回答正确', wrongTitle: '回答错误',
@@ -477,10 +500,20 @@ const EN: Dict = {
   formatYaml: 'YAML: start with reps: 1, then deck and cards; each card has type (qa / choice / cloze), '
     + 'front and back; multiple choice lists options and puts the letters in answer. Text must be quoted or a | block.',
   formatAnki: 'Same syntax as the Quizify Markdown add-on for Anki, so decks flow both ways.',
+  accountSection: 'Account (optional)',
+  accountSignedOut: 'Not signed in — your data stays on this device',
+  accountHint: 'Sign in with a HUAWEI ID to sync check-ins, progress and decks between your phone and tablet. Everything works without signing in.',
+  accountSignIn: 'Sign in with HUAWEI ID',
+  accountWorking: 'Please wait…',
+  accountSignedIn: 'Signed in · %s',
+  accountSyncHint: 'Multi-device sync is coming soon. Signing out never deletes anything on this device.',
+  accountSignOut: 'Sign out',
+  accountFailed: 'Failed: %s',
+  accountUnavailable: 'HUAWEI ID is not configured in this build (agconnect-services.json is missing)',
   aboutSection: 'About',
   aboutTagline: "A day's workload is a set; one answer is a rep.",
-  aboutLocal: 'Runs entirely on device and requests no permissions. Cards come from your own '
-    + 'files, scheduling is computed locally, and the database stays in the app sandbox.',
+  aboutLocal: 'Local first: cards come from your own files, scheduling is computed on device, and the '
+    + 'database stays in the app sandbox. The app only goes online to sync after you sign in.',
 
  dontKnow: "Don't know", nextOne: 'Next',
   correctTitle: 'Correct', wrongTitle: 'Incorrect',
