@@ -177,6 +177,8 @@ export interface Dict {
   consentDisagree: string;
   consentAgree: string;
   close: string;
+  /** 提示框默认标题,顺序同 Inline.CALLOUT_TYPES */
+  calloutLabels: string[];
   accountSyncNever: string;
   /** 上次同步的时刻 */
   accountSyncLast: string;
@@ -404,6 +406,7 @@ const ZH: Dict = {
   consentDisagree: '不同意',
   consentAgree: '同意并登录',
   close: '关闭',
+  calloutLabels: ['说明', '提示', '重要', '注意', '警告'],
   accountSyncNever: '还没有同步过',
   accountSyncLast: '上次同步 %s',
   accountSyncNow: '立即同步',
@@ -583,6 +586,7 @@ const EN: Dict = {
   consentDisagree: 'Disagree',
   consentAgree: 'Agree and sign in',
   close: 'Close',
+  calloutLabels: ['Note', 'Tip', 'Important', 'Warning', 'Caution'],
   accountSyncNever: 'Not synced yet',
   accountSyncLast: 'Last synced %s',
   accountSyncNow: 'Sync now',

@@ -6,7 +6,7 @@
  */
 
 import { NoteType } from './Models';
-import { Block, BlockKind, InlineKind, InlineSpan, flattenInline, parseInline, plainTextOf, splitBlocks, stripHardBreaks } from './Inline';
+import { Block, BlockKind, CALLOUT_TYPES, InlineKind, InlineSpan, calloutIndex, flattenInline, parseInline, plainTextOf, splitBlocks, stripHardBreaks } from './Inline';
 import { ParsedDeck, clozeAnswers, parseQuizify, renderCloze } from './Quizify';
 
 let pass = 0;
@@ -242,6 +242,38 @@ const plainBold = parseInline('**加粗** 普通');
 check('没有公式的粗体不变', shape(plainBold) === '1:加粗|0: 普通', shape(plainBold));
 const mathFirst = parseInline('$a**b$ 和 **c**');
 check('公式里的 ** 仍不当粗体', shape(mathFirst) === '6:$a**b$|0: 和 |1:c', shape(mathFirst));
+
+// ---- 斜体 *…*:星号紧贴文字才算 ----
+check('*Again* 是斜体', shape(parseInline('按 *Again* 会推高')) === '0:按 |7:Again|0: 会推高',
+  shape(parseInline('按 *Again* 会推高')));
+check('a * b 不是斜体', shape(parseInline('a * b * c')) === '0:a * b * c', shape(parseInline('a * b * c')));
+check('2*3*4 不是斜体', shape(parseInline('2*3*4')) === '0:2*3*4', shape(parseInline('2*3*4')));
+check('行首「* 列表项」不是斜体', shape(parseInline('* 列表项 *')) === '0:* 列表项 *');
+check('**粗体** 仍是粗体,不被当成斜体', shape(parseInline('**粗** 和 *斜*')) === '1:粗|0: 和 |7:斜',
+  shape(parseInline('**粗** 和 *斜*')));
+check('公式里的 * 不当斜体', shape(parseInline('$a*b*c$')) === '6:$a*b*c$');
+check('斜体不跨行', shape(parseInline('*开头\n结尾*')) === '0:*开头\n结尾*');
+check('斜体里的公式也拆出来', shape(parseInline('*设 $x$ 为*')) === '7:设 |6:$x$|7: 为',
+  shape(parseInline('*设 $x$ 为*')));
+
+// ---- 提示框 > [!NOTE] ----
+function bshape(bs: Block[]): string {
+  return bs.map((b: Block) => `${b.kind}/${b.lang}/${b.title}:${b.text}`).join(' || ');
+}
+const co = splitBlocks('前文\n\n> [!NOTE]\n> 第一行 **粗**\n> 第二行\n后文');
+check('提示框切成独立的一块,内容去掉 >', bshape(co) ===
+  '0//:前文\n || 2/note/:第一行 **粗**\n第二行 || 0//:后文', bshape(co));
+const coTitle = splitBlocks('> [!tip] 自定义标题\n> 内容');
+check('类型不分大小写、可带自定义标题', bshape(coTitle) === '2/tip/自定义标题:内容', bshape(coTitle));
+const coTwo = splitBlocks('> [!WARNING]\n> 甲\n> [!CAUTION]\n> 乙');
+check('紧挨着的两个提示框各算各的', coTwo.length === 2 && coTwo[1].lang === 'caution', bshape(coTwo));
+const coUnknown = splitBlocks('> [!FOO]\n> 内容');
+check('不认识的类型按普通文字', coUnknown.length === 1 && coUnknown[0].kind === BlockKind.Para, bshape(coUnknown));
+const coPlainQuote = splitBlocks('> 普通引用');
+check('普通引用不变', coPlainQuote[0].kind === BlockKind.Para);
+const coInCode = splitBlocks('```\n> [!NOTE]\n```');
+check('代码块里的 [!NOTE] 不当提示框', coInCode.length === 1 && coInCode[0].kind === BlockKind.Code);
+check('五种类型都认得', CALLOUT_TYPES.every((t: string) => calloutIndex(t.toUpperCase()) >= 0));
 
 console.log(`\n===== 结果: ${pass} 通过 / ${fail} 失败 =====`);
 process.exit(fail === 0 ? 0 : 1);

@@ -7,6 +7,7 @@
  * 支持的语法(取自 Quizify 规范,按真实语料里的出现频率排序):
  *   `\` 行尾硬换行     23 个文件   —— 去掉反斜杠,保留换行
  *   `**粗体**`                    —— 加粗
+ *   `*斜体*`                      —— 斜体;星号必须紧贴文字,`a * b` 不算
  *   `==高亮==`          6 个文件   —— 黄色底
  *   `` `行内代码` ``              —— 等宽 + 浅灰底
  *   `X^2^`              1 个文件   —— 上标
@@ -27,7 +28,8 @@ export enum InlineKind {
   Sup = 4,
   Sub = 5,
   /** 数学表达式,含首尾的 $。显示层先按等宽原样显示 */
-  Math = 6
+  Math = 6,
+  Italic = 7
 }
 
 /** 一个带样式的文本片段 */
@@ -69,9 +71,8 @@ interface Marker {
 }
 
 /**
- * 标记表。顺序有讲究:`**` 必须排在单个 `*` 之前,
- * 否则 `**粗体**` 会被当成两层斜体。这里不支持单个 `*`,
- * 因为真实语料里没用到,而它与数学的乘号容易混。
+ * 标记表。单个 `*` 的斜体不在表里,单独由 italicEnd 判断:
+ * 它和乘号、列表符号容易混,规则比这几种严。
  */
 const MARKERS: Marker[] = [
   { open: '**', close: '**', kind: InlineKind.Bold },
@@ -152,12 +153,60 @@ export function parseInline(text: string): InlineSpan[] {
       continue;
     }
 
+    // ---- 斜体 *…*:星号紧贴文字才算 ----
+    if (ch === '*') {
+      const end = italicEnd(src, i);
+      if (end > 0) {
+        pushPlain();
+        splitMath(src.substring(i + 1, end), InlineKind.Italic, out);
+        i = end + 1;
+        continue;
+      }
+    }
+
     plain += ch;
     i++;
   }
 
   pushPlain();
   return out;
+}
+
+function isWordChar(c: string): boolean {
+  return /[A-Za-z0-9_]/.test(c);
+}
+
+/**
+ * 从 i 处的 `*` 开始的斜体,返回收尾 `*` 的位置;不是斜体返回 -1。
+ *
+ * 规则(取 CommonMark 的简化版,宁可漏认也不误认):
+ *   - 开头 `*` 后面紧跟非空白、且不是 `*`;前面不是字母数字(`a*b*c` 不算)
+ *   - 收尾 `*` 前面紧跟非空白;后面不是字母数字
+ *   - 同一行内闭合,中间非空
+ * 于是 `*Again*` 是斜体,`a * b`、`* 列表项`、`2*3*4` 都不是。
+ */
+function italicEnd(src: string, i: number): number {
+  const next = src.charAt(i + 1);
+  if (next.length === 0 || /\s/.test(next) || next === '*') {
+    return -1;
+  }
+  if (i > 0 && (isWordChar(src.charAt(i - 1)) || src.charAt(i - 1) === '*')) {
+    return -1;
+  }
+  for (let j = i + 2; j < src.length; j++) {
+    const c = src.charAt(j);
+    if (c === '\n') {
+      return -1;
+    }
+    if (c === '*' && !/\s/.test(src.charAt(j - 1))) {
+      const after = src.charAt(j + 1);
+      if (after === '*' || isWordChar(after)) {
+        continue;
+      }
+      return j;
+    }
+  }
+  return -1;
 }
 
 /**
@@ -205,14 +254,41 @@ export enum BlockKind {
   /** 普通段落,里面还要走 parseInline 切行内标记 */
   Para = 0,
   /** ``` 围栏代码块,**整段原样显示**,不做任何行内解析 */
-  Code = 1
+  Code = 1,
+  /**
+   * 提示框 `> [!NOTE] 可选标题`,后面连续的 `>` 行是内容(Obsidian / GitHub 写法)。
+   * text 是去掉 `>` 之后的内容,照常走行内解析;lang 放类型下标(CALLOUT_TYPES)。
+   */
+  Callout = 2
 }
 
 export interface Block {
   kind: BlockKind;
   text: string;
-  /** 围栏后面跟的语言名,如 c / cpp。没写就是空串 */
+  /** 代码块:围栏后面跟的语言名,如 c / cpp。提示框:类型,如 note。没写就是空串 */
   lang: string;
+  /** 提示框自己写的标题(`> [!TIP] 这里`);没写是空串,显示层用类型的默认名 */
+  title: string;
+}
+
+/**
+ * 认得的提示框类型(GitHub 的五种)。下标与 Strings.calloutLabels、显示层的颜色表一一对应。
+ * 别的类型不认,整块按普通文字显示 —— 宁可朴素,不要猜错颜色。
+ */
+export const CALLOUT_TYPES: string[] = ['note', 'tip', 'important', 'warning', 'caution'];
+
+/** 提示框类型的下标;不认识返回 -1 */
+export function calloutIndex(type: string): number {
+  return CALLOUT_TYPES.indexOf(type.toLowerCase());
+}
+
+/** `> [!TYPE] 标题` 这一行:返回 [类型, 标题];不是提示框开头返回 null */
+function calloutHead(line: string): string[] | null {
+  const m = line.match(/^\s{0,3}>\s*\[!([A-Za-z]+)\][+-]?\s*(.*)$/);
+  if (m === null || calloutIndex(m[1]) < 0) {
+    return null;
+  }
+  return [m[1].toLowerCase(), m[2].trim()];
 }
 
 /** 一行是不是围栏边界(允许前面有空格) */
@@ -244,12 +320,25 @@ export function splitBlocks(text: string): Block[] {
   let code: string[] = [];
   let lang = '';
   let inCode = false;
+  // 正在收集的提示框:类型为空串表示不在提示框里
+  let qType = '';
+  let qTitle = '';
+  let quote: string[] = [];
+
+  const flushQuote = () => {
+    if (qType.length > 0) {
+      out.push({ kind: BlockKind.Callout, text: quote.join('\n').trim(), lang: qType, title: qTitle });
+      qType = '';
+      qTitle = '';
+      quote = [];
+    }
+  };
 
   const flushPara = () => {
     if (buf.length > 0) {
       const joined: string = buf.join('\n');
       if (joined.trim().length > 0) {
-        out.push({ kind: BlockKind.Para, text: joined, lang: '' });
+        out.push({ kind: BlockKind.Para, text: joined, lang: '', title: '' });
       }
       buf = [];
     }
@@ -257,6 +346,22 @@ export function splitBlocks(text: string): Block[] {
 
   for (const line of lines) {
     const f: string | null = fenceLang(line);
+    if (!inCode) {
+      // 提示框:开头一行定类型,后面连续的 > 行是内容,遇到别的行就结束
+      if (qType.length > 0 && f === null && /^\s{0,3}>/.test(line) && calloutHead(line) === null) {
+        quote.push(line.replace(/^\s{0,3}>\s?/, ''));
+        continue;
+      }
+      flushQuote();
+      const h: string[] | null = f === null ? calloutHead(line) : null;
+      if (h !== null) {
+        flushPara();
+        qType = h[0];
+        qTitle = h[1];
+        quote = [];
+        continue;
+      }
+    }
     if (!inCode && f !== null) {
       flushPara();
       inCode = true;
@@ -265,7 +370,7 @@ export function splitBlocks(text: string): Block[] {
       continue;
     }
     if (inCode && f !== null) {
-      out.push({ kind: BlockKind.Code, text: code.join('\n'), lang: lang });
+      out.push({ kind: BlockKind.Code, text: code.join('\n'), lang: lang, title: '' });
       inCode = false;
       lang = '';
       code = [];
@@ -277,8 +382,9 @@ export function splitBlocks(text: string): Block[] {
       buf.push(line);
     }
   }
+  flushQuote();
   if (inCode && code.length > 0) {
-    out.push({ kind: BlockKind.Code, text: code.join('\n'), lang: lang });
+    out.push({ kind: BlockKind.Code, text: code.join('\n'), lang: lang, title: '' });
   }
   flushPara();
   return out;

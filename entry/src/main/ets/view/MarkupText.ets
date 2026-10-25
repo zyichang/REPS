@@ -11,7 +11,27 @@
  */
 
 import { LengthMetrics } from '@kit.ArkUI';
-import { Block, BlockKind, InlineKind, InlineSpan, parseInline, splitBlocks } from '../data/Inline';
+import { Block, BlockKind, InlineKind, InlineSpan, calloutIndex, parseInline, splitBlocks } from '../data/Inline';
+import { L, LANG_ZH } from '../i18n/Strings';
+import { SK_LANG } from '../store/AppStore';
+
+/** 提示框的主色(标题、左边线)与底色,下标同 Inline.CALLOUT_TYPES。MathText 的网页里用同一套 */
+export const CALLOUT_FG: string[] = ['#2F6FDB', '#0E9F6E', '#7C4DDB', '#B7791F', '#D64545'];
+export const CALLOUT_BG: string[] = ['#EEF4FE', '#E8F7F1', '#F3EEFD', '#FDF5E6', '#FDEEEE'];
+
+/** 提示框标题:自己写了就用自己的,否则用类型的默认名(随界面语言) */
+export function calloutTitleOf(lang: string, b: Block): string {
+  if (b.title.length > 0) {
+    return b.title;
+  }
+  const i: number = calloutIndex(b.lang);
+  return i >= 0 ? L(lang).calloutLabels[i] : b.lang;
+}
+
+function calloutIdx(b: Block): number {
+  const i: number = calloutIndex(b.lang);
+  return i >= 0 ? i : 0;
+}
 
 @Component
 export struct MarkupText {
@@ -25,6 +45,7 @@ export struct MarkupText {
   @Prop fontPx: number = 16;
   @Prop color: string = '#1C1C1E';
   @Prop lineHeightPx: number = 25;
+  @StorageLink(SK_LANG) lang: string = LANG_ZH;
 
   /**
    * 解析结果。**必须是 @State 而不是普通字段** ——
@@ -70,11 +91,35 @@ export struct MarkupText {
       .borderRadius(8)
       .backgroundColor('#F0F1F4')
       .align(Alignment.TopStart)
+    } else if (this.blocks[i].kind === BlockKind.Callout) {
+      // 提示框:左边一条主色线 + 浅底,上面一行加粗的类型标题
+      Column({ space: 4 }) {
+        Text(calloutTitleOf(this.lang, this.blocks[i]))
+          .fontSize(this.fontPx * 0.9).fontWeight(FontWeight.Bold)
+          .fontColor(CALLOUT_FG[calloutIdx(this.blocks[i])])
+        if (this.blocks[i].text.length > 0) {
+          this.paraView(i)
+        }
+      }
+      .width('100%').alignItems(HorizontalAlign.Start)
+      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+      .borderRadius(8)
+      .border({ width: { left: 3 }, color: { left: CALLOUT_FG[calloutIdx(this.blocks[i])] } })
+      .backgroundColor(CALLOUT_BG[calloutIdx(this.blocks[i])])
     } else {
+      this.paraView(i)
+    }
+  }
+
+  /** 一段带行内标记的文字(普通段落、提示框的内容)。**只接常量下标** */
+  @Builder
+  paraView(i: number) {
       Text() {
         ForEach(this.spanOf(i), (sp: InlineSpan) => {
           if (sp.kind === InlineKind.Bold) {
             Span(sp.text).fontWeight(FontWeight.Bold)
+          } else if (sp.kind === InlineKind.Italic) {
+            Span(sp.text).fontStyle(FontStyle.Italic)
           } else if (sp.kind === InlineKind.Highlight) {
             Span(sp.text).fontColor('#8A5A00').backgroundColor('#FFF3C4')
           } else if (sp.kind === InlineKind.Code) {
@@ -99,7 +144,6 @@ export struct MarkupText {
       .fontColor(this.color)
       .lineHeight(this.lineHeightPx)
       .width('100%')
-    }
   }
 
   /** 第 i 块的行内片段。段落才需要 */

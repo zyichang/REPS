@@ -26,6 +26,15 @@
     overflow-wrap: break-word;
   }
   b        { font-weight: 700; }
+  i        { font-style: italic; }
+  /* 提示框 > [!NOTE] 等:颜色与原生 MarkupText 的 CALLOUT_FG / CALLOUT_BG 同一套,下标同 Inline.CALLOUT_TYPES */
+  .callout { margin: 8px 0; padding: 8px 12px; border-radius: 8px; border-left: 3px solid; }
+  .callout-title { font-weight: 700; font-size: 0.9em; margin-bottom: 4px; }
+  .co0 { border-color: #2F6FDB; background: #EEF4FE; } .co0 .callout-title { color: #2F6FDB; }
+  .co1 { border-color: #0E9F6E; background: #E8F7F1; } .co1 .callout-title { color: #0E9F6E; }
+  .co2 { border-color: #7C4DDB; background: #F3EEFD; } .co2 .callout-title { color: #7C4DDB; }
+  .co3 { border-color: #B7791F; background: #FDF5E6; } .co3 .callout-title { color: #B7791F; }
+  .co4 { border-color: #D64545; background: #FDEEEE; } .co4 .callout-title { color: #D64545; }
   code     { font-family: ui-monospace, Menlo, Consolas, monospace; color: #B3261E; }
   mark     { background: #FFF3C4; color: #8A5A00; }
   .blank   { color: #07C160; letter-spacing: 1px; }
@@ -105,6 +114,7 @@
       case 4:  return wrap('sup', null, sp.t);
       case 5:  return wrap('sub', null, sp.t);
       case 6:  return mathElement(sp.t);
+      case 7:  return wrap('i', null, sp.t);
       default: return textNode(sp.t);
     }
   }
@@ -141,6 +151,14 @@
         continue;
       }
       var para = document.createElement('div');
+      var host = para;
+      if (blk.k === 'q') {
+        // 提示框:外框 + 标题,内容照常按段落拼进去
+        host = document.createElement('div');
+        host.className = 'callout co' + (blk.a >= 0 && blk.a <= 4 ? blk.a : 0);
+        host.appendChild(wrap('div', 'callout-title', String(blk.t)));
+        host.appendChild(para);
+      }
       var spans = blk.spans || [];
       for (var i = 0; i < spans.length; i++) {
         var sp = spans[i];
@@ -154,7 +172,7 @@
           para.appendChild(spanElement(sp));
         }
       }
-      root.appendChild(para);
+      root.appendChild(host);
     }
     reportHeight();
     if (window.arkBridge && window.arkBridge.onStats) {

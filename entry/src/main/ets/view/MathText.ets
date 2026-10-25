@@ -21,8 +21,11 @@
 import { webview } from '@kit.ArkWeb';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import {
-  Block, BlockKind, InlineKind, InlineSpan, parseInline, splitBlocks,
+  Block, BlockKind, InlineKind, InlineSpan, calloutIndex, parseInline, splitBlocks,
 } from '../data/Inline';
+import { LANG_ZH } from '../i18n/Strings';
+import { SK_LANG } from '../store/AppStore';
+import { calloutTitleOf } from './MarkupText';
 
 const DOMAIN: number = 0x0A01;
 const TAG: string = 'REPS-Math';
@@ -36,10 +39,14 @@ interface WireSpan {
   k: number;
 }
 
-/** 一块内容。k='c' 是代码块(原样显示),否则是段落(带行内片段) */
+/**
+ * 一块内容。k='c' 代码块(原样显示);k='q' 提示框(t = 标题,a = 类型下标,spans = 内容);
+ * 否则是段落(带行内片段)
+ */
 interface WireBlock {
   k: string;
   t: string;
+  a: number;
   spans: WireSpan[];
 }
 
@@ -70,6 +77,7 @@ export struct MathText {
   @Prop @Watch('onSourceChange') source: string;
   @Prop fontPx: number;
   @Prop lineHeightPx: number;
+  @StorageLink(SK_LANG) lang: string = LANG_ZH;
 
   private controller: webview.WebviewController = new webview.WebviewController();
   /** 页面报回来的内容高度 */
@@ -84,13 +92,17 @@ export struct MathText {
     for (const b of splitBlocks(this.source)) {
       if (b.kind === BlockKind.Code) {
         // 代码块不切行内:代码里的 * _ $ 都是字面意思
-        blocks.push({ k: 'c', t: b.text, spans: [] });
+        blocks.push({ k: 'c', t: b.text, a: 0, spans: [] });
       } else {
         const spans: WireSpan[] = [];
         for (const sp of parseInline(b.text)) {
           spans.push({ t: sp.text, k: sp.kind as number });
         }
-        blocks.push({ k: 'p', t: '', spans: spans });
+        if (b.kind === BlockKind.Callout) {
+          blocks.push({ k: 'q', t: calloutTitleOf(this.lang, b), a: Math.max(0, calloutIndex(b.lang)), spans: spans });
+        } else {
+          blocks.push({ k: 'p', t: '', a: 0, spans: spans });
+        }
       }
     }
     const p: WirePayload = {
