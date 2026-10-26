@@ -1,0 +1,105 @@
+# REPS 牌组完整示例(REPS Card YAML v1)。写法说明见 docs/yaml-guide.zh.md
+reps: 1
+meta:
+  version: 1
+  author: "REPS"
+  language: zh-CN
+  license: CC-BY-4.0
+  description: "REPS 牌组格式的完整示例:每种题型和每种格式各一张"
+  generated_by: manual
+deck: REPS 格式示例
+tags: [示例]
+cards:
+  # ---- 问答 ----
+  - id: ex-qa-1
+    type: qa
+    title: "机会成本"
+    front: "什么是机会成本?"
+    back: "为了得到某样东西而必须放弃的、价值最高的那个选择。"
+    tags: [经济学]
+
+  - id: ex-qa-2
+    type: qa
+    front: "TCP 三次握手的三步分别是什么?"
+    back: |
+      1. 客户端发 **SYN**
+      2. 服务器回 **SYN + ACK**
+      3. 客户端再发 **ACK**
+
+      > [!TIP]
+      > 两次握手不够:服务器无法确认客户端收到了自己的 SYN。
+
+  # ---- 单选 ----
+  - id: ex-choice-1
+    type: choice
+    front: "下列哪种排序算法是稳定的?"
+    options: ["快速排序", "堆排序", "归并排序", "选择排序"]
+    answer: C
+    back: "归并排序合并时相等元素保持原有先后顺序。"
+
+  - id: ex-choice-2
+    type: choice
+    front: |
+      $f(x)=\dfrac{1}{3}(x+1)^{2}-\dfrac{2}{3}$ 在 $(-\infty,+\infty)$ 上是( )。
+    options: ["单调函数", "奇函数", "周期函数", "无界函数"]
+    answer: D
+    back: "开口向上的抛物线,没有上界。"
+
+  # ---- 多选 ----
+  - id: ex-multi-1
+    type: choice
+    front: "下列哪些是线性结构?"
+    options:
+      - "栈"
+      - "二叉树"
+      - "队列"
+      - "图"
+    answer: [A, C]
+    back: "栈和队列的元素一个接一个排成一条线;树和图不是。"
+
+  # ---- 挖空 ----
+  - id: ex-cloze-1
+    type: cloze
+    front: "中国的首都是 {{北京}}。"
+
+  - id: ex-cloze-2
+    type: cloze
+    front: "程序的三种基本结构是 {{顺序}}、{{选择}} 和 {{循环}}。"
+    back: "任何单入口单出口的程序都能用这三种结构表达。"
+
+  # ---- 公式、代码、格式 ----
+  - id: ex-math-1
+    type: qa
+    front: "一元二次方程 $ax^2+bx+c=0$ 的求根公式是什么?"
+    back: |
+      $$x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}$$
+
+      其中 $\Delta = b^2-4ac$ 叫 **判别式**。
+
+  - id: ex-code-1
+    type: qa
+    front: "Python 里怎样反转一个列表?"
+    back: |
+      ```python
+      nums = [1, 2, 3]
+      nums.reverse()      # 原地反转
+      print(nums[::-1])   # 返回新列表
+      ```
+
+  - id: ex-style-1
+    type: qa
+    front: "REPS 支持哪些文字格式?"
+    back: |
+      **粗体**、*斜体*、==高亮==、`行内代码`、上标 x^2^、下标 H~2~O。
+
+      > [!NOTE]
+      > 说明(蓝)
+
+      > [!IMPORTANT]
+      > 重要(紫)
+
+      > [!WARNING] 自定义标题
+      > 注意(橙)
+
+      > [!CAUTION]
+      > 警告(红)
