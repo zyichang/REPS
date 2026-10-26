@@ -4,9 +4,14 @@
     "type": "entry",
     "description": "$string:module_desc",
     "mainElement": "EntryAbility",
+    /*
+     * 2in1 = PC。不写的话 PC 上会以「手机兼容模式」运行:窗口固定手机大小,最大化也不给更宽的版面。
+     * 写了之后是普通的可缩放窗口,版面按窗口宽度走 Layout 的断点(窄单栏、宽双栏)。
+     */
     "deviceTypes": [
       "phone",
-      "tablet"
+      "tablet",
+      "2in1"
     ],
     "deliveryWithInstall": true,
     "installationFree": false,
