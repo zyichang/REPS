@@ -176,6 +176,13 @@ Error 子类型再抛,例如 `throw new QuizifyError(\`…: ${detail}\`, line)`�
   对象类型一改就要重新导出。核对云端数据:`agcli db export-data --mode Local --encryptMode UnEncrypt --zone REPS --object reps_sync --path <目录>`。
 - agcli 偶尔报 ERR_SERVER_AUTH / ERR_SERVER_BAD_GATEWAY,隔一会儿重试就好,不是项目没选的问题。
 
+**8. 安装报 `9568332 install sign info inconsistent`:设备上的旧包是另一张证书签的。**
+2026-10-26 模拟器 `127.0.0.1:5555` 上还是 9-24 用旧证书装的包(版本号是模板默认的 1.0.0),
+之后换成 AGC 登记的证书,DevEco 每次 Run 都装不上,于是一直停在那个很老的版本。
+HarmonyOS 不允许换签名覆盖安装,只能先卸载再装(`hdc -t <设备> uninstall com.reps.app`),**这会清掉那台设备上的本地数据**,
+先用 `bm dump -n com.reps.app` 看 `fingerprint` / `installTime`,再用 sqlite3 看看库里有没有东西。
+换电脑(比如 Mac)用自动签名会生成新证书,同样会撞上这个,登录还要把新指纹加到 AGC。
+
 ## 还没决定
 
 - **「一本书 → 卡组」的自动切分还没解决。**
