@@ -1,0 +1,105 @@
+# A complete REPS deck (REPS Card YAML v1). How to write one: docs/yaml-guide.en.md
+reps: 1
+meta:
+  version: 1
+  author: "REPS"
+  language: en
+  license: CC-BY-4.0
+  description: "A complete example of the REPS deck format: one card per card type and per format"
+  generated_by: manual
+deck: REPS Format Example
+tags: [example]
+cards:
+  # ---- Q&A ----
+  - id: ex-qa-1
+    type: qa
+    title: "Opportunity cost"
+    front: "What is opportunity cost?"
+    back: "The value of the best alternative you give up to get something."
+    tags: [economics]
+
+  - id: ex-qa-2
+    type: qa
+    front: "What are the three steps of the TCP handshake?"
+    back: |
+      1. The client sends **SYN**
+      2. The server replies **SYN + ACK**
+      3. The client sends **ACK**
+
+      > [!TIP]
+      > Two steps aren't enough: the server couldn't be sure the client got its SYN.
+
+  # ---- Single choice ----
+  - id: ex-choice-1
+    type: choice
+    front: "Which sorting algorithm is stable?"
+    options: ["Quicksort", "Heapsort", "Merge sort", "Selection sort"]
+    answer: C
+    back: "Merge sort keeps equal elements in their original order when merging."
+
+  - id: ex-choice-2
+    type: choice
+    front: |
+      On $(-\infty,+\infty)$, $f(x)=\dfrac{1}{3}(x+1)^{2}-\dfrac{2}{3}$ is ( ).
+    options: ["monotonic", "odd", "periodic", "unbounded"]
+    answer: D
+    back: "It's an upward-opening parabola, so it has no upper bound."
+
+  # ---- Multiple choice ----
+  - id: ex-multi-1
+    type: choice
+    front: "Which of these are linear data structures?"
+    options:
+      - "Stack"
+      - "Binary tree"
+      - "Queue"
+      - "Graph"
+    answer: [A, C]
+    back: "Stacks and queues keep elements in a single line; trees and graphs don't."
+
+  # ---- Cloze ----
+  - id: ex-cloze-1
+    type: cloze
+    front: "The capital of France is {{Paris}}."
+
+  - id: ex-cloze-2
+    type: cloze
+    front: "The three basic control structures are {{sequence}}, {{selection}}, and {{iteration}}."
+    back: "Any single-entry, single-exit program can be written with these three."
+
+  # ---- Math, code, formatting ----
+  - id: ex-math-1
+    type: qa
+    front: "What is the quadratic formula for $ax^2+bx+c=0$?"
+    back: |
+      $$x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}$$
+
+      Here $\Delta = b^2-4ac$ is the **discriminant**.
+
+  - id: ex-code-1
+    type: qa
+    front: "How do you reverse a list in Python?"
+    back: |
+      ```python
+      nums = [1, 2, 3]
+      nums.reverse()      # in place
+      print(nums[::-1])   # returns a new list
+      ```
+
+  - id: ex-style-1
+    type: qa
+    front: "Which text formats does REPS support?"
+    back: |
+      **Bold**, *italic*, ==highlight==, `inline code`, superscript x^2^, subscript H~2~O.
+
+      > [!NOTE]
+      > Note (blue)
+
+      > [!IMPORTANT]
+      > Important (purple)
+
+      > [!WARNING] A custom title
+      > Warning (orange)
+
+      > [!CAUTION]
+      > Caution (red)

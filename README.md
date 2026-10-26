@@ -52,7 +52,13 @@ REPS 想做的是把它做成一个普通人愿意每天打开的样子。
 
 ## Import format
 
-主格式是 **REPS Card YAML v1**(ADR-0007)。完整字段表、数据库结构、卡片身份与云同步见
+主格式是 **REPS Card YAML v1**(ADR-0007)。
+
+**怎样写牌组、怎样让 AI 生成:** [`docs/yaml-guide.zh.md`](docs/yaml-guide.zh.md) /
+[English](docs/yaml-guide.en.md)。每种题型一个例子,外加可直接复制的 AI 提示词;
+完整模板 `testdata/examples/example.{zh,en}.yaml`。文档里的例子由 `devtest/guide_test.ts` 逐个解析。
+
+完整字段表、数据库结构、卡片身份与云同步见
 **[docs/data-model.md](docs/data-model.md)**。
 
 ```yaml

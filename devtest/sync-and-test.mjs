@@ -118,6 +118,7 @@ const suites = [
   'dailystat_test.ts',
   'sync_test.ts',
   'publish_test.ts',
+  'guide_test.ts',
 ];
 
 for (const suite of suites) {
