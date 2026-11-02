@@ -19,6 +19,9 @@ import {
 } from '../store/AppStore';
 import { L, LANG_ZH, fmt, gradeLabels, phaseLabels } from '../i18n/Strings';
 import { formatInterval, newCardState, schedule } from '../srs/Srs';
+import {
+  CHOICE_LIMIT_MS, answerLimitMs, answerSegmentMs, choiceGrade, explainSegmentMs, goodLineMs, timesOut,
+} from '../model/Timing';
 import { MAX_READ } from './Layout';
 import { syncNow } from '../data/SyncService';
 import { common as abilityCommon } from '@kit.AbilityKit';
@@ -29,25 +32,6 @@ const MAX_GRADES: number = 560;
 const DOMAIN: number = 0x0A01;
 const TAG: string = 'REPS-Study';
 
-/**
- * 选择题自动判档的阈值(毫秒)。方案 C:对错交给机器,费劲程度用耗时推。
- *
- * 只对**选择题**生效 —— 问答和挖空没有「对错」可判,仍然自评四档。
- * 超过 T_MAX 直接判错并揭示答案:再想下去也不是回忆,是推理了。
- */
-const T_EASY_MS: number = 10 * 1000;
-const T_GOOD_MS: number = 30 * 1000;
-const T_MAX_MS: number = 60 * 1000;
-/**
- * 学习时长的保底:**每一段最多计 5 分钟**。超出的部分不计,但**不自动翻页**。
- *
- * 一张卡分两段:答题(出现 → 作答 / 超时 / 不知道 / 显示答案)和看解析(揭示答案 → 离开这张卡)。
- *   - 看解析:任何卡都用它封顶;
- *   - 答题:问答 / 挖空没有超时,用它封顶;选择题由 T_MAX_MS 封顶。
- * 难题看 20 分钟解析是正常的,少记 15 分钟无所谓。它防的是开着没关、睡着了,
- * 把某一天记成 10 个小时。
- */
-const SEGMENT_CAP_MS: number = 5 * 60 * 1000;
 /** 计时器步长。250ms 足够让秒数看起来连续,又不至于频繁重绘 */
 const TICK_MS: number = 250;
 /** 答对后自动翻页的停顿。留一眼看清绿色反馈,又不至于等得难受 */
@@ -68,11 +52,6 @@ enum Stage {
   Landing = 0,
   Card = 1,
   Done = 2
-}
-
-/** 把一段时长夹在 [0, cap] 之间。系统时间被往回调时差值会是负的,一并挡掉 */
-function clampMs(ms: number, cap: number): number {
-  return ms < 0 ? 0 : ms > cap ? cap : ms;
 }
 
 @Component
@@ -138,13 +117,20 @@ export struct StudyPage {
   private pendingLogTs: number = 0;
   /** 已过去的毫秒,由计时器驱动 —— 要显示,所以必须是 @State */
   @State private elapsedMs: number = 0;
+  /**
+   * 这张卡答题段的上限,换卡时由计时规则模块(Timing)给出。倒计时和变红都读它,所以是 @State。
+   * 会超时的卡到点判超时;不超时的卡只用它给学习时长封顶
+   */
+  @State private limitMs: number = CHOICE_LIMIT_MS;
+  /** 这张卡到上限时是否判超时(Timing.timesOut) */
+  private cardTimesOut: boolean = false;
   /** 选择题已选的字母。多答案卡可以多选 */
   @State private picked: string[] = [];
   /** 0 未判 / 1 对 / 2 错 / 3 超时 */
   @State private judged: number = 0;
   /**
    * 当前卡是否还没毕业(新卡或仍在学习步进里)。
-   * 自动判档在这种卡上**最高只给「良好」** —— 见 autoGrade。
+   * 自动判档在这种卡上**最高只给「良好」** —— 见 Timing.choiceGrade。
    */
   private curInLearning: boolean = false;
   /** 本次会话的选择题统计,用于表头的正确率与平均用时 */
@@ -321,9 +307,8 @@ export struct StudyPage {
     this.elapsedMs = 0;
     this.timer = setInterval(() => {
       this.elapsedMs = Date.now() - this.shownAt;
-      // 只有选择题有 60 秒上限:问答是自评,机器不该替用户判失败
-      if (this.cardType === (NoteType.Choice as number) && this.judged === 0
-          && this.elapsedMs >= T_MAX_MS) {
+      // 只有会超时的卡(现在是选择题)到上限才判超时:问答是自评,机器不该替用户判失败
+      if (this.cardTimesOut && this.judged === 0 && this.elapsedMs >= this.limitMs) {
         this.onTimeout();
       }
     }, TICK_MS);
@@ -361,24 +346,18 @@ export struct StudyPage {
   }
 
   /**
-   * 揭示答案:答题段到此结束,开始计看解析。返回封顶后的答题时长。
-   *
-   * 选择题按 T_MAX 封顶:到点就判超时,正常超不过它。超过只可能是计时器在后台停了 ——
-   * 切后台、锁屏回来,第一跳才判超时,中间那几个小时不是在答题。
-   * 问答 / 挖空没有超时,正面最多计 5 分钟。
+   * 揭示答案:答题段到此结束,开始计看解析。返回封顶后的答题时长(规则见 Timing.answerSegmentMs)。
    */
   private markRevealed(): number {
     const now: number = Date.now();
-    const cap: number = this.cardType === (NoteType.Choice as number) ? T_MAX_MS : SEGMENT_CAP_MS;
-    this.answerTimeMs = this.shownAt > 0 ? clampMs(now - this.shownAt, cap) : 0;
+    this.answerTimeMs = this.shownAt > 0 ? answerSegmentMs(now - this.shownAt, this.limitMs) : 0;
     this.revealedAt = now;
     return this.answerTimeMs;
   }
 
   /** 这张卡到此刻为止的学习时长 = 答题时长 + 看解析的时长(最多 5 分钟) */
   private studyMsNow(): number {
-    const explain: number = this.revealedAt > 0
-      ? clampMs(Date.now() - this.revealedAt, SEGMENT_CAP_MS) : 0;
+    const explain: number = this.revealedAt > 0 ? explainSegmentMs(Date.now() - this.revealedAt) : 0;
     return this.answerTimeMs + explain;
   }
 
@@ -404,37 +383,6 @@ export struct StudyPage {
       // 补不上就留着答题时长:只是少记一段解析,不影响排期
       hilog.error(DOMAIN, TAG, '补记看解析的时间失败 %{public}s', String(e));
     }
-  }
-
-  /**
-   * 选择题自动判档。
-   * 答错 → 忘了(FSRS 里「困难」仍算成功回忆,拿它装失败会让稳定性一直涨)。
-   * 答对 → 按耗时落到 简单 / 良好 / 困难。
-   */
-  private autoGrade(correct: boolean, ms: number): Grade {
-    if (!correct) {
-      return Grade.Again;
-    }
-    if (ms <= T_EASY_MS) {
-      /*
-       * **没毕业的卡最高只给「良好」。**
-       *
-       * FSRS 里 Easy 会让卡从学习阶段直接毕业,配上按耗时自动判档就变成
-       * 「10 秒内答对 = 这张新卡从此 6~10 天不见」—— 一次曝光就当学会了,
-       * 而四选一还有 25% 的猜中率,猜得快的卡会被直接推走。
-       *
-       * 压到 Good 之后:第一次答对 → 10 分钟后再确认一次,第二次答对才毕业。
-       * 复习卡不受影响,答对照样按保持率排到天以外。
-       */
-      // 调度器已经保证没毕业的卡不会因为 Easy 跳过步进(见 Srs.schedule 附近的注释)。
-      // 这里再压一次是为了**显示一致**:否则界面写「评为简单」、调度理由写「良好」,
-      // 用户会以为自己看错了。手动点「简单」按钮不经过这里,由调度器兜住。
-      return this.curInLearning ? Grade.Good : Grade.Easy;
-    }
-    if (ms <= T_GOOD_MS) {
-      return Grade.Good;
-    }
-    return Grade.Hard;
   }
 
   /**
@@ -531,7 +479,7 @@ export struct StudyPage {
     this.judged = correct ? 1 : 2;
     this.revealed = true;
     this.noteChoiceResult(correct, ms);
-    this.commit(this.autoGrade(correct, ms));
+    this.commit(choiceGrade(correct, ms, this.limitMs, this.curInLearning));
     this.afterJudge(correct);
   }
 
@@ -613,6 +561,9 @@ export struct StudyPage {
     this.cardBack = row.back;
     this.cardAnswer = row.answer;
     this.cardType = row.type;
+    // 必须在 startTimer 之前:计时器和倒计时都按这张卡的上限算
+    this.limitMs = answerLimitMs(row.type);
+    this.cardTimesOut = timesOut(row.type);
     const st0: CardState | null = appStore().getDb().loadState(id);
     this.curInLearning = st0 === null
       || st0.phase === LearnPhase.New || st0.phase === LearnPhase.Learning;
@@ -939,7 +890,7 @@ export struct StudyPage {
           .textAlign(TextAlign.Center)
         Text(this.timerText())
           .fontSize(11)
-          .fontColor(this.elapsedMs >= T_GOOD_MS ? '#E5544B' : '#8A8A8E')
+          .fontColor(this.elapsedMs >= goodLineMs(this.limitMs) ? '#E5544B' : '#8A8A8E')
           .layoutWeight(1).textAlign(TextAlign.End)
       }
       .width('100%')
@@ -967,7 +918,7 @@ export struct StudyPage {
     if (this.cardType !== (NoteType.Choice as number) || this.judged !== 0) {
       return '';
     }
-    const left: number = Math.max(0, Math.ceil((T_MAX_MS - this.elapsedMs) / 1000));
+    const left: number = Math.max(0, Math.ceil((this.limitMs - this.elapsedMs) / 1000));
     return `${left}${L(this.lang).unitSec}`;
   }
 

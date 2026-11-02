@@ -235,6 +235,7 @@ entry/src/main/ets/
 ├── data/Quizify / Yaml / Inline / Importer   解析与导入
 ├── store/AppStore.ets      数据库连接 + 全局设置 + SK_TICK 重绘计数
 ├── srs/Srs.ets             FSRS-6;srs/Ebbinghaus.ets 固定阶梯
+├── model/Timing.ets        计时规则:上限、选择题按用时判档、学习时长两段封顶(学习页只管显示)
 └── i18n/Strings.ets        中英文案(两个字典字段必须一一对应)
 
 devtest/                   桌面测试台,不需要模拟器(14 套)

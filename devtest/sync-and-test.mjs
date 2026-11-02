@@ -53,6 +53,8 @@ const FILES = [
   [join(ets, 'model', 'Models.ets'), join(here, 'Models.ts'), []],
   // 设置滚轮的档位表。纯数组 + 一个就近查找,搬出 UI 就是为了能这样测。
   [join(ets, 'model', 'Steps.ets'), join(here, 'Steps.ts'), []],
+  // 计时规则(上限、按用时判档、学习时长封顶)。同样是从学习页搬出来的纯逻辑
+  [join(ets, 'model', 'Timing.ets'), join(here, 'Timing.ts'), []],
   // 表结构与行映射。纯逻辑、不碰 @kit.*,所以能直接在 node:sqlite 上执行,
   // 桌面测试跑的就是生产那份 SQL,不存在手抄副本走样的问题。
   [join(ets, 'data', 'Schema.ets'), join(here, 'Schema.ts'), [
@@ -105,6 +107,7 @@ const suites = [
   'yaml_test.ts',
   'cards_test.ts',
   'steps_test.ts',
+  'timing_test.ts',
   'stats_test.ts',
   'deckcounts_test.ts',
   'browse_test.ts',

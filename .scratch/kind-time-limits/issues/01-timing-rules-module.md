@@ -29,3 +29,17 @@ Status: ready-for-agent
 None - can start immediately
 
 ## Comments
+
+### 2026-11-02 · 已完成(待提交)
+
+- 新模块 `model/Timing.ets`(放在 `model/`,和同样是从界面搬出来的 `Steps.ets` 一起):上限 `answerLimitMs`、
+  是否超时 `timesOut`、判档线 `easyLineMs` / `goodLineMs`、判档 `choiceGrade`、两段封顶 `answerSegmentMs` /
+  `explainSegmentMs`。判档线写成「上限 / 6」「上限 / 2」的除法:乘 1/6 有浮点误差,压线的 10 秒可能被判成良好。
+- 学习页换卡时取一次 `limitMs`(@State,倒计时和变红都读它)和 `cardTimesOut`;计时阈值常量、`clampMs`、`autoGrade` 都删掉了。
+  02 起只需要改模块里「这张卡的上限怎么算」。
+- 测试:`devtest/timing_test.ts` 33 条,登记进同步清单和套件列表,同步出来的 `devtest/Timing.ts` 加进 .gitignore。
+  完整桌面测试台 26 / 26 通过。
+- clean 构建 BUILD SUCCESSFUL,`StudyPage.ets` 和 `Timing.ets` 没有警告;解包 HAP,`modules.abc` 里有 `choiceGrade` 等符号,
+  确认模块真的被编译进去了。
+- 行为不变是逐条对过的:上限 60 秒时判档线正好是 10 / 30 秒;问答 / 挖空的上限仍是 5 分钟且不超时,倒计时照旧不显示。
+  这一条是纯重构,没有在模拟器上手动跑。
