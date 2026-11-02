@@ -1,6 +1,6 @@
 /**
  * 格式指南的守卫:docs/yaml-guide.{zh,en}.md 里的每个 ```yaml 例子、
- * testdata/examples/example.{zh,en}.yaml 都必须能被生产解析器(Yaml.ets)解析。
+ * testdata/examples/example.{zh,en}.yaml 与 example-exam.{zh,en}.yaml 都必须能被生产解析器(Yaml.ets)解析。
  *
  * 文档是给用户和 AI 当模板抄的 —— 格式改了而文档没跟上,AI 会照着错的例子批量生成坏卡。
  * ADR-0001 的教训:文档里的例子必须真的能导入。
@@ -62,7 +62,7 @@ for (const lang of ['zh', 'en']) {
   console.log(`\n=== docs/yaml-guide.${lang}.md ===`);
   const md = readFileSync(join(root, 'docs', `yaml-guide.${lang}.md`), 'utf8');
   const blocks = yamlBlocks(md);
-  check(`${lang}:有 7 个 yaml 例子`, blocks.length === 7, `${blocks.length}`);
+  check(`${lang}:有 8 个 yaml 例子`, blocks.length === 8, `${blocks.length}`);
   let cards = 0;
   blocks.forEach((b, i) => {
     const r = tryParse(b);
@@ -72,8 +72,20 @@ for (const lang of ['zh', 'en']) {
       cards += (r as ParsedDeck).cards.length;
     }
   });
-  check(`${lang}:例子共 10 张卡`, cards === 10, `${cards}`);
+  check(`${lang}:例子共 13 张卡`, cards === 13, `${cards}`);
+  // 第 8 节:题型与上限(ADR-0008)
+  const v2 = blocks.map((b) => tryParse(b)).find((r) => typeof r !== 'string' && r.format === 2);
+  check(`${lang}:有一个 reps: 2 的例子`, v2 !== undefined);
+  if (v2 !== undefined && typeof v2 !== 'string') {
+    check(`${lang}:它的 time_limits 是 choice 2.5 / essay 30`,
+      v2.timeLimits.map((t) => `${t.kind} ${t.minutes}`).join(' / ') === 'choice 2.5 / essay 30',
+      v2.timeLimits.map((t) => `${t.kind} ${t.minutes}`).join(' / '));
+    check(`${lang}:它的卡片题型是 选择(没写)/ long / essay`, v2.cards.map((c) => c.kind).join(',') === ',long,essay',
+      v2.cards.map((c) => c.kind).join(','));
+  }
   check(`${lang}:AI 提示词提到三种题型`, md.includes('type: qa') && md.includes('type: choice') && md.includes('type: cloze'));
+  check(`${lang}:AI 提示词提到 kind 和 time_limits`,
+    md.includes('kind: essay') && md.includes('kind: long') && md.includes('kind: blank') && md.includes('time_limits'));
   // 错误示例用 ```text,真要是写成 yaml 也必须解析失败
   check(`${lang}:错误示例不在 yaml 块里`, !blocks.some((b) => b.includes('answer: E')));
 }
@@ -107,6 +119,28 @@ for (const lang of ['zh', 'en']) {
 if (decks.length === 2) {
   check('中英两份示例的卡片 id 一一对应',
     decks[0].cards.map((c) => c.id).join(',') === decks[1].cards.map((c) => c.id).join(','));
+}
+
+console.log('\n=== testdata/examples/example-exam.{zh,en}.yaml(reps: 2)===');
+const exams: ParsedDeck[] = [];
+for (const lang of ['zh', 'en']) {
+  const r = tryParse(readFileSync(join(root, 'testdata', 'examples', `example-exam.${lang}.yaml`), 'utf8'));
+  check(`example-exam.${lang}.yaml 能解析`, typeof r !== 'string', typeof r === 'string' ? r : typesOf(r));
+  if (typeof r === 'string') {
+    continue;
+  }
+  exams.push(r);
+  check(`${lang}:format = 2`, r.format === 2, `${r.format}`);
+  check(`${lang}:time_limits 是 choice 2.5 / blank 4 / essay 30`,
+    r.timeLimits.map((t) => `${t.kind} ${t.minutes}`).join(' / ') === 'choice 2.5 / blank 4 / essay 30');
+  check(`${lang}:每种题型的写法各一张(选择题与挖空卡不写 kind)`,
+    r.cards.map((c) => c.kind).join(',') === ',blank,long,essay,', r.cards.map((c) => c.kind).join(','));
+  check(`${lang}:考试填空题是问答卡`, r.cards.find((c) => c.id === 'exam-blank-1')?.type === NoteType.QA);
+  check(`${lang}:meta 齐全`, r.meta.version === 1 && r.meta.license === 'CC-BY-4.0' && r.meta.generatedBy === 'manual');
+}
+if (exams.length === 2) {
+  check('中英两份考试示例的卡片 id 一一对应',
+    exams[0].cards.map((c) => c.id).join(',') === exams[1].cards.map((c) => c.id).join(','));
 }
 
 console.log(`\n===== 结果: ${pass} 通过 / ${fail} 失败 =====`);

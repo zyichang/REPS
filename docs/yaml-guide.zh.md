@@ -1,4 +1,4 @@
-# 怎样写 REPS 牌组(REPS Card YAML v1)
+# 怎样写 REPS 牌组(REPS Card YAML v1 / v2)
 
 [English](yaml-guide.en.md)
 
@@ -179,7 +179,64 @@ cards:
 
 不支持图片、音频、视频。
 
-## 8. 写法规则(容易出错的地方)
+## 8. 题型与答题时间上限(reps: 2)
+
+考试题要练节奏:每种题型有一个答题时间上限,时间到了自动翻面、记「忘了」。
+默认上限够背诵用;考试牌组按真实考试在文件里改。用到下面两个字段时,第一行要写 `reps: 2`。
+
+**卡片的 `kind`(题型)。** 它和 `type` 是两回事:`type` 是怎么作答,`kind` 是考试里的哪一类题。
+
+| `kind` | 题型 | 默认上限 | 不写 `kind` 时 |
+|---|---|---|---|
+| `choice` | 选择题 | 60 秒 | `type: choice` 的卡算这一类 |
+| `blank` | 填空题 | 60 秒 | `type: cloze` 的卡算这一类 |
+| `short` | 简答题 | 60 秒 | `type: qa` 的卡算这一类 |
+| `long` | 大题(解答题、计算题) | 5 分钟 | 必须写明 |
+| `essay` | 写作题 | 25 分钟 | 必须写明 |
+
+考试里的填空题(先算出结果再填进去)用 `type: qa` 写,再加 `kind: blank`。
+大题和写作题记了「忘了」之后当天不再出现,第二天再来。
+
+**牌组顶层的 `time_limits`。** 和 `deck` 同级,每行写 `题型: 分钟`,可以是小数,要大于 0、不超过 180。
+只写要改的题型,没写的用默认上限。
+
+```yaml
+reps: 2
+deck: 示例 · 题型与上限
+time_limits:
+  choice: 2.5
+  essay: 30
+cards:
+  - id: exam-choice-1
+    type: choice
+    front: "某商品先涨价 20%,再降价 20%,现价是原价的( )"
+    options: ["96%", "100%", "104%", "80%", "120%"]
+    answer: A
+    back: "1.2 × 0.8 = 0.96。"
+
+  - id: exam-long-1
+    type: qa
+    kind: long
+    front: |
+      求极限 $\lim_{x \to 0} \dfrac{\sin x}{x}$。
+    back: |
+      **1。** 由夹逼定理:$\cos x < \dfrac{\sin x}{x} < 1$。
+
+  - id: exam-essay-1
+    type: qa
+    kind: essay
+    front: |
+      论说文:以「坚持」为话题,写一篇 700 字左右的论说文,题目自拟。
+    back: |
+      **审题:** 坚持是手段,不是目的;写清楚坚持什么、为什么值得坚持。
+
+      **结构:** 提出论点 → 正面论证 → 反面论证 → 结论。
+```
+
+这副牌组里,选择题上限 2.5 分钟,写作题 30 分钟,大题没写,用默认的 5 分钟。
+完整的考试牌组示例:[`testdata/examples/example-exam.zh.yaml`](../testdata/examples/example-exam.zh.yaml)。
+
+## 9. 写法规则(容易出错的地方)
 
 - **文字一律加引号或用 `|`**:`front`、`back`、`title`、每个选项。
   不加引号时,冒号会截断内容、`no` 会变成布尔值、`#` 会被当成注释,所以 REPS 直接拒绝。
@@ -188,6 +245,7 @@ cards:
 - `#` 注释只能单独占一行。
 - 选项里**不要**自己写 `A.`,App 会加。
 - 选择题必须有 `options`(至少 2 项)和 `answer`;别的题型不要写 `options`。
+- 用了 `kind` 或 `time_limits`,第一行必须是 `reps: 2`。`reps: 1` 的文件里写了它们会报错。
 
 错误示例(导入时会报错并给出行号):
 
@@ -197,27 +255,32 @@ cards:
     answer: E                           ← 只有两个选项,没有 E
 ```
 
-## 9. 让 AI 生成牌组
+## 10. 让 AI 生成牌组
 
 把下面这段提示词连同资料(书的章节、讲义、笔记)一起发给 AI。
-最好再附上完整示例文件 `testdata/examples/example.zh.yaml`。
+最好再附上完整示例文件 `testdata/examples/example.zh.yaml`;考试牌组再附上 `example-exam.zh.yaml`。
 
 ```text
 请阅读我提供的资料,把其中值得记住的知识点做成 REPS 牌组,只输出一个 YAML 文件,不要别的解释。
 
-格式要求(REPS Card YAML v1):
-1. 第一行 reps: 1;然后 deck: 牌组名;可选 tags: [标签1, 标签2];然后 cards: 列表。
-2. 每张卡写 id(字母数字和 -,如 ch1-001,不重复)、type、front,按题型补充:
+格式要求(REPS Card YAML):
+1. 第一行 reps: 1(用到第 3 条的 kind 或 time_limits 时写 reps: 2);然后 deck: 牌组名;
+   可选 tags: [标签1, 标签2];然后 cards: 列表。
+2. 每张卡写 id(字母数字和 -,如 ch1-001,不重复)、type、front,按卡片类型补充:
    - type: qa   问答题,必须有 back。
    - type: choice 选择题,options 只写选项内容(不要写 A. B.),每项加双引号;
      answer 单选写一个字母(如 C),多选写列表(如 [A, C])。back 写解析。
    - type: cloze 挖空题,在 front 里用 {{答案}} 挖空,一张卡的空会同时考。
-3. 所有文字(front、back、title、每个选项)必须用双引号,或者用 | 写多行块(正文多缩进 2 格)。
-4. 缩进用 2 个空格,不用 Tab。
-5. 可以用 Markdown:**粗体**、*斜体*、==高亮==、`代码`、``` 代码块;
+3. 考试题再写 kind(题型):写作题 kind: essay,解答题和计算题 kind: long,
+   考试里的填空题(用 type: qa)kind: blank;选择题、挖空题、简答题不用写。
+   写了 kind 的牌组,在 deck 下面加 time_limits,按真实考试给每类题估一个答题上限(分钟),
+   例如 time_limits: 下面缩进写 choice: 2.5 和 essay: 30。
+4. 所有文字(front、back、title、每个选项)必须用双引号,或者用 | 写多行块(正文多缩进 2 格)。
+5. 缩进用 2 个空格,不用 Tab。
+6. 可以用 Markdown:**粗体**、*斜体*、==高亮==、`代码`、``` 代码块;
    公式用 $…$ 和 $$…$$(LaTeX);提示框用 > [!NOTE] / [!TIP] / [!IMPORTANT] / [!WARNING] / [!CAUTION]。
-6. 一张卡只考一个知识点;正面是清楚的问题,背面先给简短答案,再给必要的解释。
-7. 不要放图片和链接。
+7. 一张卡只考一个知识点;正面是清楚的问题,背面先给简短答案,再给必要的解释。
+8. 不要放图片和链接。
 ```
 
 生成后直接导入。导入失败时,App 会告诉你第几行出错,把报错发回给 AI 让它改就行。

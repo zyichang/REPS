@@ -1,0 +1,59 @@
+# REPS 考试牌组示例(REPS Card YAML v2:题型 kind 与答题时间上限 time_limits)。写法说明见 docs/yaml-guide.zh.md 第 8 节
+reps: 2
+meta:
+  version: 1
+  author: "REPS"
+  language: zh-CN
+  license: CC-BY-4.0
+  description: "考试牌组的写法:每种题型一张,按真实考试设答题时间上限"
+  generated_by: manual
+deck: REPS 考试牌组示例
+tags: [示例, 考试]
+# 只写要改的题型,其余用默认上限(选择题、填空题、简答题 60 秒,大题 5 分钟,写作题 25 分钟)
+time_limits:
+  choice: 2.5
+  blank: 4
+  essay: 30
+cards:
+  # ---- 选择题:不写 kind,type: choice 就算选择题 ----
+  - id: exam-choice-1
+    type: choice
+    front: "某商品先涨价 20%,再降价 20%,现价是原价的( )"
+    options: ["96%", "100%", "104%", "80%", "120%"]
+    answer: A
+    back: "1.2 × 0.8 = 0.96,比原价低 4%。"
+
+  # ---- 考试填空题:算出结果再填,写成问答卡 + kind: blank ----
+  - id: exam-blank-1
+    type: qa
+    kind: blank
+    front: |
+      设 $f(x) = x^3 - 3x$,则 $f(x)$ 的极小值为 ____。
+    back: |
+      **-2。** $f'(x) = 3x^2 - 3 = 0$ 得 $x = \pm 1$;$x = 1$ 处 $f''(1) = 6 > 0$,极小值 $f(1) = -2$。
+
+  # ---- 大题:kind: long,牌组没写,用默认 5 分钟 ----
+  - id: exam-long-1
+    type: qa
+    kind: long
+    front: |
+      求极限 $\lim_{x \to 0} \dfrac{\sin x}{x}$,并写出依据。
+    back: |
+      **1。** 当 $0 < |x| < \dfrac{\pi}{2}$ 时,$\cos x < \dfrac{\sin x}{x} < 1$;两边的极限都是 1,由夹逼定理得 1。
+
+  # ---- 写作题:kind: essay,牌组设成 30 分钟 ----
+  - id: exam-essay-1
+    type: qa
+    kind: essay
+    front: |
+      论说文:以「坚持」为话题,写一篇 700 字左右的论说文,题目自拟。
+    back: |
+      **审题:** 坚持是手段,不是目的;写清楚坚持什么、为什么值得坚持。
+
+      **结构:** 提出论点 → 正面论证 → 反面论证 → 结论。
+
+  # ---- 背诵用的挖空卡:不写 kind 就算填空题,和上面的考试填空题共用 4 分钟 ----
+  # (一副牌组里一般不会两种都有;这里放在一起只是为了演示)
+  - id: exam-cloze-1
+    type: cloze
+    front: "导数为零的点叫作 {{驻点}}。"

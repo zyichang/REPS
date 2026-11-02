@@ -1,0 +1,60 @@
+# A REPS exam deck (REPS Card YAML v2: question kinds and answer time limits). How to write one: section 8 of docs/yaml-guide.en.md
+reps: 2
+meta:
+  version: 1
+  author: "REPS"
+  language: en
+  license: CC-BY-4.0
+  description: "How to write an exam deck: one card per question kind, with time limits based on the real exam"
+  generated_by: manual
+deck: REPS Exam Deck Example
+tags: [example, exam]
+# List only the kinds you change; the rest keep their defaults (multiple choice, fill-in-the-blank,
+# short answer 60 s; long answer 5 min; essay 25 min)
+time_limits:
+  choice: 2.5
+  blank: 4
+  essay: 30
+cards:
+  # ---- Multiple choice: no kind needed, type: choice counts as multiple choice ----
+  - id: exam-choice-1
+    type: choice
+    front: "A price rises 20%, then falls 20%. The new price is what share of the original?"
+    options: ["96%", "100%", "104%", "80%", "120%"]
+    answer: A
+    back: "1.2 × 0.8 = 0.96, so 4% below the original."
+
+  # ---- Exam fill-in-the-blank: work out the result, written as a Q&A card + kind: blank ----
+  - id: exam-blank-1
+    type: qa
+    kind: blank
+    front: |
+      Let $f(x) = x^3 - 3x$. The local minimum of $f(x)$ is ____.
+    back: |
+      **-2.** $f'(x) = 3x^2 - 3 = 0$ gives $x = \pm 1$; at $x = 1$, $f''(1) = 6 > 0$, so the minimum is $f(1) = -2$.
+
+  # ---- Long answer: kind: long, not in time_limits, so it keeps the default 5 minutes ----
+  - id: exam-long-1
+    type: qa
+    kind: long
+    front: |
+      Find $\lim_{x \to 0} \dfrac{\sin x}{x}$ and justify it.
+    back: |
+      **1.** For $0 < |x| < \dfrac{\pi}{2}$, $\cos x < \dfrac{\sin x}{x} < 1$; both bounds tend to 1, so by the squeeze theorem the limit is 1.
+
+  # ---- Essay: kind: essay, set to 30 minutes for this deck ----
+  - id: exam-essay-1
+    type: qa
+    kind: essay
+    front: |
+      Essay: write about 700 words on the topic of "persistence". Choose your own title.
+    back: |
+      **Reading the prompt:** persistence is a means, not an end; say what is worth persisting in, and why.
+
+      **Structure:** thesis → supporting argument → counterargument → conclusion.
+
+  # ---- A memorization cloze card: without kind it counts as fill-in-the-blank and shares the 4 minutes above ----
+  # (a real deck rarely has both; they sit together here only for the demo)
+  - id: exam-cloze-1
+    type: cloze
+    front: "A point where the derivative is zero is called a {{stationary point}}."

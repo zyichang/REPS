@@ -26,3 +26,15 @@ Status: ready-for-agent
 - `.scratch/kind-time-limits/issues/04-deck-time-limits-end-to-end.md`
 
 ## Comments
+
+### 2026-11-03 · 已完成
+
+- 数据模型文档 §1:标题改成 v1 / v2;顶层表加 `time_limits`,`reps` 写明 1 / 2 的规则;新增 1.2a(分钟、范围、默认上限表);
+  卡片表加 `kind`(取值、推导规则、考试填空题写法),`type` 标明是卡片类型;1.5 报错清单、1.6 兼容格式补上 v2 的内容。
+- 中英文格式指南:新增第 8 节「题型与答题时间上限(reps: 2)」(题型表 + 一个能导入的完整例子),写法规则加一条,
+  给 AI 的提示词加第 3 条(什么时候写 kind、time_limits 怎么定);后面两节顺延成 9、10。
+- 新增示例 `testdata/examples/example-exam.{zh,en}.yaml`(reps: 2,五张卡各演示一种写法,中英 id 一一对应);
+  原来的 `example.{zh,en}.yaml` 不动,仍是 reps: 1。
+- `guide_test`:例子数 8、卡数 13;第 8 节的例子是 reps: 2、上限和题型对得上;提示词提到 kind 与 time_limits;
+  两份考试示例能解析、format 2、上限 / 题型 / 中英 id 一致。62 条全过,完整测试台 26 / 26。
+- 模拟器上导入 `example-exam.zh.yaml`:5 张卡,牌组上限和每张卡的题型都存对了(ADR-0007「文档里的例子要真能导入」)。

@@ -7,18 +7,20 @@
 > **状态标记:** 本文描述的是**目标结构 schema v2**。标 🚧 的部分要等对应任务完成才生效,
 > 完成后去掉标记。
 
-## 1. 文件格式:REPS Card YAML v1
+## 1. 文件格式:REPS Card YAML v1 / v2
 
 纯文字牌组是一个 `.yaml` 文件。带图片/音频时是 zip `.reps`(`deck.yaml` + `media/`,🚧 以后做)。
+v2 = v1 + 卡片的 `kind` 与顶层的 `time_limits`(ADR-0008);其余字段和规则完全相同。
 
 ### 1.1 顶层字段
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
-| `reps` | 是 | 格式版本,现在是 `1` |
+| `reps` | 是 | 格式版本:`1` 或 `2`。用到 `kind` / `time_limits` 时必须是 `2`;`reps: 1` 里写了它们报错 |
 | `meta` | 否 | 牌组信息块,见 1.2 |
 | `deck` | 是 | 牌组名 |
 | `tags` | 否 | 行内列表,如 `[数学, 考研]` |
+| `time_limits` | 否(v2) | 各题型的答题时间上限,见 1.2a |
 | `cards` | 是 | 卡片列表,每张以 `- ` 开头 |
 
 ### 1.2 `meta`(导入时全可选;发布到牌组广场时标 ★ 的必填)
@@ -34,12 +36,30 @@
 | `source` | 内容来源(如教材名) |
 | `generated_by` | `manual` / `ai` / `ai+manual` |
 
+### 1.2a `time_limits`(v2,ADR-0008)
+
+和 `deck` 同级,下面缩进写若干 `题型: 分钟`。分钟可以是小数(`2.5` = 2 分 30 秒),要大于 0、不超过 180。
+键只能是题型代号(见 1.3 的 `kind`),每个最多写一次;没写的题型用默认上限:
+
+| 题型 | 默认上限 |
+|---|---|
+| `choice` 选择题、`blank` 填空题、`short` 简答题 | 60 秒 |
+| `long` 大题 | 5 分钟 |
+| `essay` 写作题 | 25 分钟 |
+
+```yaml
+time_limits:
+  choice: 2.5
+  essay: 30
+```
+
 ### 1.3 每张卡
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
 | `id` | 否 | 卡片固定身份。字母、数字、`-`,文件内唯一。缺了导入时生成,导出时写回 |
-| `type` | 否 | `qa`(默认)/ `choice` / `cloze` |
+| `type` | 否 | 卡片类型(怎么作答):`qa`(默认)/ `choice` / `cloze` |
+| `kind` | 否(v2) | 题型(考试里的哪类题,只决定答题时间上限和「忘了」之后当天还出不出现):`choice` / `blank` / `short` / `long` / `essay`。没写时按 `type` 推出:`choice` → `choice`,`cloze` → `blank`,`qa` → `short`;`long` 与 `essay` 必须写明。考试填空题写成 `type: qa` + `kind: blank` |
 | `title` | 否 | 显示在列表与浏览页 |
 | `front` | 是 | 正面 |
 | `back` | `qa` 必填 | 背面;`choice` / `cloze` 里是可选的解析 |
@@ -60,13 +80,18 @@
 ### 1.5 导入时报错(带 YAML 行号)
 
 答案字母超出选项 · 选项少于 2 · `choice` 缺 `options` 或 `answer` · 非 `choice` 却写了 `options` ·
-`id` 重复 · 未知字段 · 文字用了裸标量。
+`id` 重复 · 未知字段 · 文字用了裸标量 ·
+(v2)不认识的 `kind` · `time_limits` 里不认识的题型、写了两次、不是数字、不在 0~180 分钟之内、整块是空的 ·
+`reps: 1` 里写了 `kind` / `time_limits`(提示改成 `reps: 2`)· `reps` 不是 1 或 2。
 
 ### 1.6 兼容格式
 
 - **没有 `reps:` 的旧 YAML**(如 `testdata/math1000.yml`):只认 `deck` / `tags` / 卡片的 `front` + `back`,
-  `;;;` 选择题照旧识别。解析结果 `format = 0`。写了 v1 字段(`type` / `options`…)会提示加 `reps: 1`。
+  `;;;` 选择题照旧识别。解析结果 `format = 0`。写了 v1 字段(`type` / `options`…)会提示加 `reps: 1`;
+  写了 `kind` / `time_limits` 会提示加 `reps: 2`。
 - **Quizify Card Markdown**(`+++` / `***` / `;;;`)仍可导入,产出同样的卡片结构。不再作为主格式。
+  它和旧 YAML 都不支持 `kind` / `time_limits`:卡片的题型一律按卡片类型推出,上限全用默认值。
+- **导出写够用的最低版本**:用到 `kind` 或 `time_limits` 才写 `reps: 2`,否则写 `reps: 1`,旧版 App 还能读(ADR-0008)。
 
 ### 1.7 进了 App 之后
 
