@@ -1,6 +1,6 @@
 # ADR-0007 · 卡片格式改为 REPS Card YAML v1;分享文件只放内容
 
-- **状态**:已接受
+- **状态**:已接受;2026-11-02 由 ADR-0008 扩展(用到题型或时间上限的牌组写成 `reps: 2`)
 - **日期**:2026-10-25
 - **相关**:`data/Yaml.ets`、`data/Quizify.ets`、`data/Importer.ets`、`docs/data-model.md`、ADR-0002、ADR-0006
 - **取代**:ADR-0001(「保留 Quizify Markdown,不迁移到 YAML」)
