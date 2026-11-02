@@ -20,7 +20,8 @@ import {
 import { L, LANG_ZH, fmt, gradeLabels, phaseLabels } from '../i18n/Strings';
 import { formatInterval, newCardState, schedule } from '../srs/Srs';
 import {
-  CHOICE_LIMIT_MS, answerLimitMs, answerSegmentMs, choiceGrade, explainSegmentMs, goodLineMs, timesOut,
+  SHORT_LIMIT_MS, answerSegmentMs, choiceGrade, countdownRed, countdownText, defaultLimitMs, explainSegmentMs,
+  kindOf,
 } from '../model/Timing';
 import { MAX_READ } from './Layout';
 import { syncNow } from '../data/SyncService';
@@ -118,12 +119,9 @@ export struct StudyPage {
   /** 已过去的毫秒,由计时器驱动 —— 要显示,所以必须是 @State */
   @State private elapsedMs: number = 0;
   /**
-   * 这张卡答题段的上限,换卡时由计时规则模块(Timing)给出。倒计时和变红都读它,所以是 @State。
-   * 会超时的卡到点判超时;不超时的卡只用它给学习时长封顶
+   * 这张卡答题段的上限,换卡时按题型取(Timing)。到点就超时;倒计时和变红都读它,所以是 @State
    */
-  @State private limitMs: number = CHOICE_LIMIT_MS;
-  /** 这张卡到上限时是否判超时(Timing.timesOut) */
-  private cardTimesOut: boolean = false;
+  @State private limitMs: number = SHORT_LIMIT_MS;
   /** 选择题已选的字母。多答案卡可以多选 */
   @State private picked: string[] = [];
   /** 0 未判 / 1 对 / 2 错 / 3 超时 */
@@ -307,8 +305,8 @@ export struct StudyPage {
     this.elapsedMs = 0;
     this.timer = setInterval(() => {
       this.elapsedMs = Date.now() - this.shownAt;
-      // 只有会超时的卡(现在是选择题)到上限才判超时:问答是自评,机器不该替用户判失败
-      if (this.cardTimesOut && this.judged === 0 && this.elapsedMs >= this.limitMs) {
+      // 任何卡到上限都判超时(CONTEXT.md「超时」)。显示答案之后就不再算:那是在看解析
+      if (this.judged === 0 && !this.revealed && this.elapsedMs >= this.limitMs) {
         this.onTimeout();
       }
     }, TICK_MS);
@@ -334,14 +332,23 @@ export struct StudyPage {
     this.immersive = false;
   }
 
-  /** 超时:揭示答案,按「忘了」记一次 */
+  /**
+   * 超时:任何卡都揭示答案,按「忘了」记一次。不自动翻页 —— 解析可以慢慢看,看解析最多计 5 分钟。
+   * 自己评级的卡也一样:到时间还没答完,说明这张卡需要更常出现(CONTEXT.md「超时」)。
+   */
   private onTimeout(): void {
     this.stopTimer();
     const ms: number = this.markRevealed();
     this.judged = 3;
     this.revealed = true;
+    if (this.cardType === (NoteType.Cloze as number)) {
+      this.clozeFront = renderCloze(this.cardStem, true);
+    }
     this.lastLine = L(this.lang).timeUp;
-    this.noteChoiceResult(false, ms);
+    // 「平均用时」只算选择题:写作题一道就要二三十分钟,混进去平均值就没意义了
+    if (this.cardType === (NoteType.Choice as number)) {
+      this.noteChoiceResult(false, ms);
+    }
     this.commit(Grade.Again);
   }
 
@@ -562,8 +569,7 @@ export struct StudyPage {
     this.cardAnswer = row.answer;
     this.cardType = row.type;
     // 必须在 startTimer 之前:计时器和倒计时都按这张卡的上限算
-    this.limitMs = answerLimitMs(row.type);
-    this.cardTimesOut = timesOut(row.type);
+    this.limitMs = defaultLimitMs(kindOf(row.type));
     const st0: CardState | null = appStore().getDb().loadState(id);
     this.curInLearning = st0 === null
       || st0.phase === LearnPhase.New || st0.phase === LearnPhase.Learning;
@@ -607,8 +613,9 @@ export struct StudyPage {
         retrievability: r.retrievability, intervalDays: r.intervalDays,
           costMs: this.studyMsNow(), algo: st.algo,
       });
-      // 选择题这时才刚揭示答案,解析还没看;离开这张卡时 finishCard 再把那段补进来
-      if (this.cardType === (NoteType.Choice as number)) {
+      // 判完就落库、离开这张卡时才补看解析的时间:选择题判完 / 不知道,以及任何卡超时。
+      // 自己点评级的问答 / 挖空卡这时解析已经看完,不用补
+      if (this.cardType === (NoteType.Choice as number) || this.judged === 3) {
         this.pendingLogCard = this.cardId;
         this.pendingLogTs = now;
       }
@@ -890,7 +897,7 @@ export struct StudyPage {
           .textAlign(TextAlign.Center)
         Text(this.timerText())
           .fontSize(11)
-          .fontColor(this.elapsedMs >= goodLineMs(this.limitMs) ? '#E5544B' : '#8A8A8E')
+          .fontColor(countdownRed(this.cardType, this.elapsedMs, this.limitMs) ? '#E5544B' : '#8A8A8E')
           .layoutWeight(1).textAlign(TextAlign.End)
       }
       .width('100%')
@@ -913,13 +920,12 @@ export struct StudyPage {
     return `${sec.toFixed(1)}${L(this.lang).unitSec}`;
   }
 
-  /** 只有选择题显示读秒 —— 问答不设上限,给个秒数反而像在催 */
+  /** 倒计时。每种卡都有上限,所以都显示;作答或显示答案之后就不显示了(格式见 Timing.countdownText) */
   private timerText(): string {
-    if (this.cardType !== (NoteType.Choice as number) || this.judged !== 0) {
+    if (this.judged !== 0 || this.revealed) {
       return '';
     }
-    const left: number = Math.max(0, Math.ceil((this.limitMs - this.elapsedMs) / 1000));
-    return `${left}${L(this.lang).unitSec}`;
+    return countdownText(this.limitMs - this.elapsedMs, L(this.lang).unitSec);
   }
 
   @Builder
@@ -1011,10 +1017,17 @@ export struct StudyPage {
             .width('90%').constraintSize({ maxWidth: MAX_READ }).height(48).fontSize(16).margin({ bottom: 14 })
             .onClick(() => this.nextCard())
         }
+      } else if (this.judged === 3) {
+        // 问答 / 挖空超时:已经记了「忘了」,只剩「下一个」,不再给评级按钮(和选择题超时一样)
+        Button(L(this.lang).nextOne)
+          .width('90%').constraintSize({ maxWidth: MAX_READ }).height(48).fontSize(16).margin({ bottom: 14 })
+          .onClick(() => this.nextCard())
       } else if (!this.revealed) {
         Button(L(this.lang).showAnswer)
           .width('90%').constraintSize({ maxWidth: MAX_READ }).height(48).fontSize(16).margin({ bottom: 14 })
           .onClick(() => {
+            // 时间内主动显示答案:答题段到此结束,计时器停掉,不会再判超时
+            this.stopTimer();
             this.markRevealed();
             this.revealed = true;
             if (this.cardType === (NoteType.Cloze as number)) {

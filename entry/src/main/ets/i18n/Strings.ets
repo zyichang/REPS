@@ -424,7 +424,7 @@ const ZH: Dict = {
   autoNextHint: '答错永远会停下来看解析,不受这个开关影响',
 
  accuracy: '正确率', avgTime: '平均用时', unitSec: '秒',
-  timeUp: '超过 60 秒,按「忘了」处理', confirmPick: '确认',
+  timeUp: '时间到,按「忘了」处理', confirmPick: '确认',
   pickHint: '选一个', correctMark: '答对', wrongMark: '答错',
 
  readFailed: '读取失败: %s', importedTo: '已导入 %d 张卡到「%s」',
@@ -605,7 +605,7 @@ const EN: Dict = {
   autoNextHint: 'A wrong answer always stops on the explanation, regardless of this',
 
  accuracy: 'Accuracy', avgTime: 'Avg time', unitSec: 's',
-  timeUp: 'Over 60s — counted as Again', confirmPick: 'Confirm',
+  timeUp: "Time's up — counted as Again", confirmPick: 'Confirm',
   pickHint: 'Pick one', correctMark: 'Correct', wrongMark: 'Wrong',
 
  readFailed: 'Read failed: %s', importedTo: 'Imported %d cards into “%s”',
