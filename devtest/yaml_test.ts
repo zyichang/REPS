@@ -302,7 +302,7 @@ expectError('问答题写了 options', H + `  - front: "甲"\n    back: "乙"\n 
 expectError('问答题写了 answer', H + `  - front: "甲"\n    back: "乙"\n    answer: A\n`, 6, 'choice');
 expectError('问答题缺 back', H + `  - front: "甲"\n`, 4, 'back');
 expectError('挖空题没有 {{}}', H + `  - type: cloze\n    front: "甲"\n`, 4, '{{');
-expectError('不认识的题型', H + `  - type: essay\n    front: "甲"\n    back: "乙"\n`, 4, 'essay');
+expectError('不认识的卡片类型(提示题型写在 kind 里)', H + `  - type: essay\n    front: "甲"\n    back: "乙"\n`, 4, 'kind');
 expectError('id 重复', H +
   `  - id: a1\n    front: "甲"\n    back: "乙"\n  - id: a1\n    front: "丙"\n    back: "丁"\n`, 7, 'a1');
 expectError('id 只能是字母数字和 -', H + `  - id: "a b"\n    front: "甲"\n    back: "乙"\n`, 4, 'id');
@@ -314,7 +314,7 @@ expectError('多行选项没加引号', H +
 expectError('v1 里 title 也要引号', H + `  - title: 标题\n    front: "甲"\n    back: "乙"\n`, 4, '引号');
 expectError('v1 不再支持 ;;; 选择题块', H +
   `  - front: |\n      题干\n      ;;;\n      A. x\n      ;;;A\n    back: "乙"\n`, 4, 'options');
-expectError('不支持的格式版本', `reps: 2\ndeck: 测试\ncards:\n  - front: "甲"\n    back: "乙"\n`, 1, '2');
+expectError('不支持的格式版本', `reps: 3\ndeck: 测试\ncards:\n  - front: "甲"\n    back: "乙"\n`, 1, '3');
 expectError('meta 的未知字段', `reps: 1\nmeta:\n  colour: red\ndeck: 测试\ncards:\n  - front: "甲"\n    back: "乙"\n`,
   3, 'colour');
 expectError('meta.version 必须是整数', `reps: 1\nmeta:\n  version: v2\ndeck: 测试\ncards:\n  - front: "甲"\n    back: "乙"\n`,
@@ -329,6 +329,29 @@ const m1000: ParsedDeck = parseYamlDeck(readFileSync(join(here, '..', 'testdata'
 check('math1000.yml 能导入', m1000.cards.length > 200, `${m1000.cards.length}`);
 check('旧格式 format 记为 0(没有 reps)', m1000.format === 0, `${m1000.format}`);
 check('旧格式里的 ;;; 选择题仍然识别', m1000.cards.some((c) => c.type === NoteType.Choice));
+
+console.log('\n=== 11. v2:卡片的 kind(题型,ADR-0008)===');
+
+const V2 = 'reps: 2\ndeck: 测试\ncards:\n';   // 第 4 行起是卡片
+const v2: ParsedDeck = parseYamlDeck(V2 +
+  `  - type: qa\n    kind: essay\n    front: "写一篇论说文"\n    back: "范文"\n` +
+  `  - kind: long\n    front: "求极限"\n    back: "答案"\n` +
+  `  - type: choice\n    front: "选一个"\n    options: ["a", "b"]\n    answer: A\n`);
+check('reps: 2 的 format 记为 2', v2.format === 2, `${v2.format}`);
+check('kind 读对了,没写的是空串', v2.cards.map((c) => c.kind).join(',') === 'essay,long,',
+  v2.cards.map((c) => c.kind).join(','));
+check('kind 不影响卡片类型', v2.cards[0].type === NoteType.QA && v2.cards[1].type === NoteType.QA &&
+  v2.cards[2].type === NoteType.Choice);
+check('五种题型都认', ['choice', 'blank', 'short', 'long', 'essay'].every((k) =>
+  parseYamlDeck(V2 + `  - kind: ${k}\n    front: "甲"\n    back: "乙"\n`).cards[0].kind === k));
+check('reps: 2 不写 kind 也行', parseYamlDeck(V2 + `  - front: "甲"\n    back: "乙"\n`).cards[0].kind === '');
+check('reps: 1 的卡 kind 为空', parseYamlDeck(H + `  - front: "甲"\n    back: "乙"\n`).cards[0].kind === '');
+expectError('不认识的 kind', V2 + `  - kind: big\n    front: "甲"\n    back: "乙"\n`, 4, 'big');
+expectError('kind 的报错列出全部取值', V2 + `  - front: "甲"\n    kind: 作文\n    back: "乙"\n`, 5, 'essay');
+expectError('**reps: 1 里写了 kind:报错,提示改成 reps: 2**',
+  H + `  - front: "甲"\n    back: "乙"\n    kind: essay\n`, 6, 'reps: 2');
+expectError('没有 reps 的旧格式写了 kind:提示加 reps: 2',
+  `deck: 测试\ncards:\n  - front: "甲"\n    back: "乙"\n    kind: essay\n`, 5, 'reps: 2');
 
 console.log(`\n===== 结果: ${pass} 通过 / ${fail} 失败 =====`);
 if (fail > 0) {

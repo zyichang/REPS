@@ -67,6 +67,11 @@ export interface ParsedCard {
   id: string;
   /** 这张卡自己的标签(v1 的卡片 `tags`;Quizify 取自卡片开头的 `<!-- quizify-card -->` 注释) */
   tags: string[];
+  /**
+   * 题型(`reps: 2` 的卡片 `kind`,CONTEXT.md「题型」)。空串 = 文件里没写,学习时按卡片类型推出。
+   * Quizify Markdown 与 v1 / 旧 YAML 没有这个字段,恒为空串。
+   */
+  kind: string;
 }
 
 /** 牌组信息(REPS YAML v1 的 `meta` 块)。没写的字段是空串 / 0 */
@@ -99,6 +104,10 @@ export interface ParsedDeck {
     */
   deck: string;
   tags: string[];
+  /**
+   * 格式版本:没有 `reps` 的旧 YAML 记 0;`reps: 1` 与 Quizify Markdown(它自己的 format: 1)记 1;
+   * `reps: 2` 记 2(ADR-0008)
+   */
   format: number;
   /**
    * 文件里原本有没有 front matter。false 表示卡组名是调用方兜底给的,
@@ -768,6 +777,7 @@ export function parseQuizify(text: string, fallbackDeck?: string): ParsedDeck {
       line: cardStartLine,
       id: '',
       tags: meta.tags,
+      kind: '',
     });
   };
 

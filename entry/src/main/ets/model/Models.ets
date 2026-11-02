@@ -23,7 +23,7 @@ export enum Grade {
   Easy = 3
 }
 
-/** 卡片题型,由 Quizify 语法决定 */
+/** 卡片类型:一张卡怎么作答,由数据结构决定(CONTEXT.md「卡片类型」)。和题型(Timing.Kind)是两回事 */
 export enum NoteType {
   /** 问答:正面提问,背面作答 */
   QA = 0,

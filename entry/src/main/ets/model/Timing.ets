@@ -14,6 +14,19 @@ import { Grade, NoteType } from './Models';
  */
 export type Kind = 'choice' | 'blank' | 'short' | 'long' | 'essay';
 
+/** 全部题型代号,按文档里的顺序。牌组文件里 `kind` 只能写这几个(解析器用它校验) */
+export const KINDS: Kind[] = ['choice', 'blank', 'short', 'long', 'essay'];
+
+/** 这个词是不是题型代号 */
+export function isKind(word: string): boolean {
+  for (const k of KINDS) {
+    if (k === word) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const SEC: number = 1000;
 const MINUTE: number = 60 * SEC;
 
@@ -48,10 +61,16 @@ export function clampMs(ms: number, cap: number): number {
 }
 
 /**
- * 这张卡的有效题型。现在一律按卡片类型推出:选择 → 选择题,挖空 → 填空题,问答 → 简答题。
- * 大题和写作题只能在牌组文件里明写(issue 03 接上 `kind`)。
+ * 这张卡的有效题型。牌组文件里明写的 `kind` 优先(explicitKind,空串 = 没写);
+ * 没写就按卡片类型推出:选择 → 选择题,挖空 → 填空题,问答 → 简答题。大题和写作题只能明写。
+ * 明写的值导入时已经校验过;万一库里是认不出的值,也按没写处理,不让一张坏卡卡住学习页。
  */
-export function kindOf(cardType: number): Kind {
+export function kindOf(cardType: number, explicitKind: string): Kind {
+  for (const k of KINDS) {
+    if (k === explicitKind) {
+      return k;
+    }
+  }
   if (cardType === (NoteType.Choice as number)) {
     return 'choice';
   }

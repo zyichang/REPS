@@ -1,5 +1,6 @@
 /**
- * 导出:库里的一副牌组 -> REPS Card YAML v1 文本(ADR-0007,docs/data-model.md §1、§6)。
+ * 导出:库里的一副牌组 -> REPS Card YAML 文本(ADR-0007、ADR-0008,docs/data-model.md §1、§6)。
+ * 版本号写够用的最低版本:用到题型(kind)才写 reps: 2。
  *
  * **纯逻辑,不 import 任何 @kit.\*** —— 桌面测试 export_test 把导出结果再交给 parseYamlDeck,
  * 断言逐字段往返一致。写文件、弹分享面板在 Database / ExportAction 里。
@@ -32,6 +33,8 @@ export interface ExportCard {
   /** notes.uuid,可能带「牌组uuid/」前缀 */
   uuid: string;
   type: number;
+  /** 明写的题型(notes.kind);'' = 没写,导出时不写 kind */
+  kind: string;
   title: string;
   front: string;
   back: string;
@@ -124,9 +127,17 @@ function metaLines(deck: ExportDeck): string[] {
   return out;
 }
 
+/**
+ * 这副牌组要写成哪个格式版本:**够用的最低版本**(ADR-0008)。
+ * 用到 v2 字段(卡片的 kind)才写 reps: 2,否则照旧 reps: 1,旧版 App 还能读。
+ */
+export function formatVersionOf(cards: ExportCard[]): number {
+  return cards.some((c: ExportCard) => c.kind.length > 0) ? 2 : 1;
+}
+
 /** 整副牌组 -> YAML 文本(以换行结尾) */
 export function exportYaml(deck: ExportDeck, cards: ExportCard[]): string {
-  const out: string[] = ['reps: 1', ...metaLines(deck), `deck: ${dq(deck.name)}`];
+  const out: string[] = [`reps: ${formatVersionOf(cards)}`, ...metaLines(deck), `deck: ${dq(deck.name)}`];
   if (deck.tags.length > 0) {
     out.push(`tags: ${inlineList(deck.tags)}`);
   }
@@ -134,6 +145,9 @@ export function exportYaml(deck: ExportDeck, cards: ExportCard[]): string {
   for (const c of cards) {
     out.push(`  - id: ${cardIdOf(deck.uuid, c.uuid)}`);
     out.push(`    type: ${typeWord(c.type)}`);
+    if (c.kind.length > 0) {
+      out.push(`    kind: ${c.kind}`);
+    }
     if (c.title.length > 0 && c.title !== fallbackTitle(c.front)) {
       out.push(...textField('title', c.title, 4));
     }

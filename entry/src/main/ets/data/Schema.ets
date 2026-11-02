@@ -446,7 +446,7 @@ export const SQL_FILL_DECK_UUID: string =
  * 之后的每次改表都是 MIGRATIONS 里的一项。老库和新库走同一条路:DDL → 旧的按列迁移 → MIGRATIONS。
  * v2 之前的迁移(拍平 decks、补 archived、回填打卡)靠「列在不在」判断,保持原样。
  */
-export const SCHEMA_VERSION: number = 3;
+export const SCHEMA_VERSION: number = 4;
 
 export interface Migration {
   /** 跑完之后 user_version 设成它 */
@@ -513,6 +513,13 @@ export const MIGRATIONS: Migration[] = [
        )`,
     ],
   },
+  {
+    // v4(ADR-0008):卡片的题型,即牌组文件里的 kind。'' = 文件里没写,学习时按卡片类型推出
+    version: 4,
+    statements: [
+      `ALTER TABLE notes ADD COLUMN kind TEXT NOT NULL DEFAULT ''`,
+    ],
+  },
 ];
 
 /** 从当前版本出发还要跑哪些迁移,按版本升序 */
@@ -535,7 +542,7 @@ export const SQL_INSERT_CARD: string =
 export const SQL_COUNT_CARDS: string = `SELECT COUNT(*) AS n FROM cards`;
 
 export const SQL_SELECT_NOTE_BY_CARD: string =
-  `SELECT n.id AS note_id, n.type, n.front, n.back, n.title, n.options, n.answer,
+  `SELECT n.id AS note_id, n.type, n.kind, n.front, n.back, n.title, n.options, n.answer,
           n.fingerprint, c.ordinal, d.name AS deck_name
      FROM cards c
      JOIN notes n ON n.id = c.note_id
@@ -1417,6 +1424,8 @@ export function retentionOf(points: LogPoint[]): number {
 export interface ReviewCardRow {
   note_id: number;
   type: number;
+  /** 牌组文件里明写的题型(kind);'' = 没写,学习时按卡片类型推出(Timing.kindOf) */
+  kind: string;
   front: string;
   back: string;
   title: string;
@@ -1512,11 +1521,17 @@ export interface FingerprintUpgrade {
 /**
  * 卡片内容哈希(notes.content_hash):同一张卡(同 id / 同指纹)重导时,用它判断内容变没变。
  * 包含所有用户看得见、改了就该更新的字段;不含身份(id / 指纹)与排期。64 位,算法同指纹。
+ *
+ * 题型(kind)也算内容:只改了题型的卡,重导时要被认作「改过」,新题型才存得进去。
+ * **题型为空时哈希与加题型之前完全一样** —— 否则所有旧卡下次导入都会被当成改过(reimport_test 有金值)。
  */
 export function contentHashOf(type: number, title: string, front: string, back: string,
-                              options: string[], answer: string, tags: string[]): string {
-  const raw = [`${type}`, title, front, back, options.join('\n'), answer, tags.join('\n')]
-    .join('\u0000');
+                              options: string[], answer: string, tags: string[], kind: string): string {
+  const parts: string[] = [`${type}`, title, front, back, options.join('\n'), answer, tags.join('\n')];
+  if (kind.length > 0) {
+    parts.push(kind);
+  }
+  const raw = parts.join('\u0000');
   return fnv1a32(raw) + mix32(raw);
 }
 
@@ -1630,16 +1645,16 @@ export const SQL_NOTE_BY_UUID_IN_DECK: string =
 export const SQL_NOTE_BY_FP_IN_DECK: string =
   `SELECT id, content_hash FROM notes WHERE deck_id = ? AND fingerprint = ? LIMIT 1`;
 
-/** 新卡落库(schema v2 全列)。参数顺序见 Database.insertNoteRow 与 import_test */
+/** 新卡落库(schema v4 全列)。参数顺序见 Database.insertNoteRow 与 import_test */
 export const SQL_INSERT_NOTE_V2: string =
   `INSERT INTO notes (deck_id, type, front, back, title, options, answer, source_file,
-                      fingerprint, uuid, updated_at, content_hash, tags)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+                      fingerprint, uuid, updated_at, content_hash, tags, kind)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-/** 重导时更新一张旧卡的内容。**身份(uuid / 指纹)与排期都不动。** 最后一个参数是 note id */
+/** 重导时更新一张旧卡的内容(含题型)。**身份(uuid / 指纹)与排期都不动。** 最后一个参数是 note id */
 export const SQL_UPDATE_NOTE_CONTENT: string =
   `UPDATE notes SET type = ?, front = ?, back = ?, title = ?, options = ?, answer = ?,
-          tags = ?, content_hash = ?, source_file = ?, updated_at = ? WHERE id = ?`;
+          tags = ?, kind = ?, content_hash = ?, source_file = ?, updated_at = ? WHERE id = ?`;
 
 /** 按 meta.id 找牌组 */
 export const SQL_DECK_BY_UUID: string = `SELECT id, uuid FROM decks WHERE uuid = ?`;
@@ -1665,7 +1680,7 @@ export const SQL_EXPORT_DECK: string = `SELECT name, uuid, tags, meta FROM decks
  * 导出文件里没有任何个人学习数据(docs/data-model.md §6)。
  */
 export const SQL_EXPORT_NOTES: string =
-  `SELECT uuid, type, title, front, back, options, answer, tags
+  `SELECT uuid, type, kind, title, front, back, options, answer, tags
      FROM notes WHERE deck_id = ? AND deleted_at = 0 ORDER BY id ASC`;
 
 /** tags 列(JSON 文本)-> 数组。旧行或坏数据一律当空列表,不让导出因为一列失败 */

@@ -92,7 +92,7 @@ FSRS-6 与固定阶梯共用同一份流水。
 | 表 | 一行是 | 主要列 |
 |---|---|---|
 | `decks` | 一副牌组 | `id`、`name`(唯一)、`uuid`(部分唯一索引)、`version`、`meta`(JSON)、`tags`(JSON)、`updated_at`、`deleted_at` |
-| `notes` | 一张卡的内容 | `deck_id`、`type`、`front`、`back`、`title`、`options`、`answer`、`source_file`、`fingerprint`、`uuid`、`updated_at`、`content_hash`(🚧 Task 4 起填写)、`tags`、`deleted_at` |
+| `notes` | 一张卡的内容 | `deck_id`、`type`、`front`、`back`、`title`、`options`、`answer`、`source_file`、`fingerprint`、`uuid`、`updated_at`、`content_hash`(🚧 Task 4 起填写)、`tags`、`deleted_at`、`kind`(v4:牌组文件里明写的题型,'' = 没写) |
 | `cards` | 一个排期单位(与 notes 1:1) | `note_id`、`ordinal`(恒 0)、`uuid`、`updated_at` |
 | `scheduling` | 一张卡当前的排期 | `card_id`、`stability`、`difficulty`、`reps`、`lapses`、`streak`、`last_review`、**`due`**、`phase`、`step`、`first_seen`、`updated_at`(每次写入后 = `last_review`) |
 | `review_log` | 一次作答 | `card_id`、`ts`、`grade`、`stability_before`、`elapsed_days`、`retrievability`、`interval_days`、`cost_ms`、`algo`、`archived` |
@@ -108,7 +108,7 @@ FSRS-6 与固定阶梯共用同一份流水。
   🚧 但删除目前仍是真删、读路径也还没过滤它 —— 等 Task 8 同步需要墓碑时一起改,
   免得现在给几十条查询加过滤却没有任何代码会写这一列。
 - **迁移**:`PRAGMA user_version`(relationalStore 里是 `RdbStore.version`)记录 schema 版本,
-  当前 **v3**(v3 加了 `remote_day_stats` 与 `sync_tombstones` 两张表,见 §5.4)。DDL 永远是 v1 基线;之后每次改表在 `Schema.MIGRATIONS` 加一项,
+  当前 **v4**(v3 加了 `remote_day_stats` 与 `sync_tombstones` 两张表,见 §5.4;v4 给 `notes` 加了 `kind`,ADR-0008)。DDL 永远是 v1 基线;之后每次改表在 `Schema.MIGRATIONS` 加一项,
   老库和新库走同一条路(DDL → 旧的按列迁移 → MIGRATIONS),每个版本一个事务。
 - **新 uuid** 由 Database 层 `util.generateRandomUUID` 生成(v4 格式);v2 之前导入的
   笔记/卡片保留原来的 `n-…` / `c-…` uuid,不重新生成。

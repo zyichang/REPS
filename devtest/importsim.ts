@@ -37,7 +37,7 @@ export interface SimResult {
 
 let rnd = 0;
 export function hashOf(c: ParsedCard): string {
-  return contentHashOf(c.type, c.title, c.front, c.back, c.options, c.answer, c.tags);
+  return contentHashOf(c.type, c.title, c.front, c.back, c.options, c.answer, c.tags, c.kind ?? '');
 }
 
 /** failAt >= 0 时在插第 failAt 张新卡前抛错(测回滚) */
@@ -77,7 +77,7 @@ export function importParsed(db: DatabaseSync, parsed: ParsedDeck, now: number, 
     for (const u of plan.updates) {
       const c = parsed.cards[u.index];
       db.prepare(SQL_UPDATE_NOTE_CONTENT).run(c.type, c.front, c.back, c.title, c.options.join('\n'), c.answer,
-        JSON.stringify(c.tags), hashOf(c), 'test', now, u.noteId);
+        JSON.stringify(c.tags), c.kind ?? '', hashOf(c), 'test', now, u.noteId);
     }
     let n = 0;
     for (const i of plan.fresh) {
@@ -88,7 +88,8 @@ export function importParsed(db: DatabaseSync, parsed: ParsedDeck, now: number, 
       const c = parsed.cards[i];
       const uuid = noteUuidOf(deckUuid, c.id.length > 0 ? c.id : `gen-${++rnd}`);
       const r = db.prepare(SQL_INSERT_NOTE_V2).run(deckId, c.type, c.front, c.back, c.title, c.options.join('\n'),
-        c.answer, 'test', fingerprintOf(parsed.deck, c.key, 0), uuid, now, hashOf(c), JSON.stringify(c.tags));
+        c.answer, 'test', fingerprintOf(parsed.deck, c.key, 0), uuid, now, hashOf(c), JSON.stringify(c.tags),
+        c.kind ?? '');
       db.prepare(`INSERT INTO cards (note_id, ordinal, uuid, updated_at) VALUES (?, 0, ?, ?)`)
         .run(Number(r.lastInsertRowid), uuid, now);
     }

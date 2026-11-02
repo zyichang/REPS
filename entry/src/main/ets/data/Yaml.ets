@@ -1,9 +1,10 @@
 /**
  * YAML 卡组导入 —— 一个**严格子集**,不是通用 YAML 解析器。两条路:
  *
- * **1. REPS Card YAML v1**(文件里有顶层 `reps: 1`,ADR-0007,字段表见 docs/data-model.md)
+ * **1. REPS Card YAML v1 / v2**(文件里有顶层 `reps: 1` 或 `reps: 2`,ADR-0007、ADR-0008,字段表见 docs/data-model.md)
  *    直接产出 ParsedCard:`type` / `options` / `answer` / `id` / `title` / `tags` / `meta`
  *    都是结构化字段,不经过 Quizify。选择题的选项按位置编成 A、B、C…,答案物理上不在正面。
+ *    v2 = v1 + 卡片的 `kind`(题型);`reps: 1` 的文件里写了它就报错,保证 v1 文件任何版本都读得了。
  *
  * **2. 旧格式**(没有 `reps`,如 testdata/math1000.yml)—— 兼容导入,行为不变:
  *    只认 deck / tags 和一串 front + back,拼成 Quizify Markdown 交给 `parseQuizify` 收尾,
@@ -27,6 +28,7 @@
  */
 
 import { NoteType } from '../model/Models';
+import { KINDS, isKind } from '../model/Timing';
 import {
   DeckMeta, ParsedCard, ParsedDeck, QuizifyError, cardKeyOf, clozeAnswers, emptyMeta, parseQuizify,
 } from './Quizify';
@@ -360,6 +362,12 @@ function parseLegacy(lines: string[]): ParsedDeck {
                 `${k2} is a REPS YAML v1 field. To use it, add reps: 1 as the first line of the file`),
                 i + 1);
             }
+            if (k2 === 'kind') {
+              throw new QuizifyError(
+                m('kind 是 REPS YAML v2 的字段。要用它,请在文件第一行加上 reps: 2',
+                'kind is a REPS YAML v2 field. To use it, add reps: 2 as the first line of the file'),
+                i + 1);
+            }
             throw new QuizifyError(
               m(`不认识的字段 ${k2}。一张卡只有 front 和 back(没有页码,见 ADR-0002)`,
               `Unknown field ${k2}. A card has only front and back (no page number, see ADR-0002)`),
@@ -482,7 +490,7 @@ interface FlowItem {
   quoted: boolean;
 }
 
-const V1_CARD_FIELDS: string[] = ['id', 'type', 'title', 'front', 'back', 'options', 'answer', 'tags'];
+const V1_CARD_FIELDS: string[] = ['id', 'type', 'kind', 'title', 'front', 'back', 'options', 'answer', 'tags'];
 const V1_META_FIELDS: string[] = [
   'id', 'version', 'author', 'language', 'license', 'description', 'source', 'generated_by',
 ];
@@ -893,8 +901,18 @@ function buildV1Card(c: RawV1Card, index: number): ParsedCard {
   } else if (typeWord === 'cloze') {
     type = NoteType.Cloze;
   } else if (typeWord !== 'qa') {
-    throw new QuizifyError(m(`不认识的题型 ${typeWord}。type 只能是 qa / choice / cloze`,
-      `Unknown type ${typeWord}. type must be qa / choice / cloze`), typeVal === null ? c.line : typeVal.line);
+    throw new QuizifyError(m(`不认识的卡片类型 ${typeWord}。type 只能是 qa / choice / cloze;`
+      + '写作题、大题这类题型写在 kind 里(要 reps: 2)',
+      `Unknown card type ${typeWord}. type must be qa / choice / cloze; `
+      + 'question kinds such as essay or long go in kind (needs reps: 2)'), typeVal === null ? c.line : typeVal.line);
+  }
+
+  // 题型(ADR-0008)。只校验取值;reps: 1 里不许写 kind 由 parseV1 统一检查
+  const kindVal: Val | null = fieldOf(c, 'kind');
+  const kind: string = kindVal === null ? '' : wordOf(kindVal, 'kind');
+  if (kindVal !== null && !isKind(kind)) {
+    throw new QuizifyError(m(`不认识的题型 ${kind}。kind 只能是 ${KINDS.join(' / ')}`,
+      `Unknown question kind ${kind}. kind must be ${KINDS.join(' / ')}`), kindVal.line);
   }
 
   const frontVal: Val | null = fieldOf(c, 'front');
@@ -992,6 +1010,7 @@ function buildV1Card(c: RawV1Card, index: number): ParsedCard {
     line: c.line,
     id: id,
     tags: tags,
+    kind: kind,
   };
 }
 
@@ -1002,6 +1021,8 @@ function parseV1(lines: string[]): ParsedDeck {
   let meta: DeckMeta = emptyMeta();
   let raws: RawV1Card[] = [];
   let sawCards = false;
+  /** reps: 1 或 2。用到 v2 字段(kind)的文件必须写 2(ADR-0008) */
+  let version = 1;
   const seenTop: string[] = [];
 
   let i = 0;
@@ -1033,10 +1054,11 @@ function parseV1(lines: string[]): ParsedDeck {
 
     if (key === 'reps') {
       const ver = unquote(rest).trim();
-      if (ver !== '1') {
-        throw new QuizifyError(m(`不支持的格式版本 reps: ${ver}。这个版本的 REPS 只认 reps: 1`,
-          `Unsupported format version reps: ${ver}. This version of REPS only reads reps: 1`), i + 1);
+      if (ver !== '1' && ver !== '2') {
+        throw new QuizifyError(m(`不支持的格式版本 reps: ${ver}。这个版本的 REPS 认 reps: 1 和 reps: 2`,
+          `Unsupported format version reps: ${ver}. This version of REPS reads reps: 1 and reps: 2`), i + 1);
       }
+      version = ver === '2' ? 2 : 1;
       i++;
     } else if (key === 'deck') {
       deck = unquote(rest).trim();
@@ -1082,6 +1104,12 @@ function parseV1(lines: string[]): ParsedDeck {
   const idLine = new Map<string, number>();
   const keyLine = new Map<string, number>();
   for (let k = 0; k < raws.length; k++) {
+    const kindVal: Val | null = fieldOf(raws[k], 'kind');
+    if (version < 2 && kindVal !== null) {
+      // 「写着 reps: 1 的文件,任何版本的 App 都读得了」—— 这条保证不能破(ADR-0008)
+      throw new QuizifyError(m('kind 是 reps: 2 的字段。要用它,请把文件开头的 reps: 1 改成 reps: 2',
+        'kind is a reps: 2 field. To use it, change reps: 1 at the top of the file to reps: 2'), kindVal.line);
+    }
     const c: ParsedCard = buildV1Card(raws[k], k);
     if (c.id.length > 0) {
       const prev = idLine.get(c.id);
@@ -1106,7 +1134,7 @@ function parseV1(lines: string[]): ParsedDeck {
   return {
     deck: deck,
     tags: tags,
-    format: 1,
+    format: version,
     hadFrontMatter: true,
     cards: cards,
     meta: meta,

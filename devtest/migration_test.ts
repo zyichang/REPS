@@ -103,9 +103,11 @@ for (const c of ['uuid', 'version', 'meta', 'tags', 'updated_at', 'deleted_at'])
   check(`decks 有 ${c} 列`, dc.includes(c));
 }
 const nc = cols(db, 'notes');
-for (const c of ['content_hash', 'tags', 'deleted_at']) {
+for (const c of ['content_hash', 'tags', 'deleted_at', 'kind']) {
   check(`notes 有 ${c} 列`, nc.includes(c));
 }
+check('v4:旧笔记的题型都是空串(按卡片类型推出)',
+  count(db, `SELECT COUNT(*) AS n FROM notes WHERE kind = ''`) === before.notes);
 check('scheduling 有 updated_at 列', cols(db, 'scheduling').includes('updated_at'));
 
 const deckUuids = db.prepare('SELECT uuid FROM decks ORDER BY id').all() as { uuid: string }[];

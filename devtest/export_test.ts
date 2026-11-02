@@ -40,11 +40,11 @@ function exportFrom(db: DatabaseSync, deckId: number): string {
   }
   const deck: ExportDeck = { name: d.name, uuid: d.uuid, tags: parseTagsColumn(d.tags), meta: meta };
   const rows = db.prepare(SQL_EXPORT_NOTES).all(deckId) as {
-    uuid: string; type: number; title: string; front: string; back: string; options: string; answer: string;
-    tags: string;
+    uuid: string; type: number; kind: string; title: string; front: string; back: string; options: string;
+    answer: string; tags: string;
   }[];
   const cards: ExportCard[] = rows.map((r) => ({
-    uuid: r.uuid, type: r.type, title: r.title, front: r.front, back: r.back,
+    uuid: r.uuid, type: r.type, kind: r.kind, title: r.title, front: r.front, back: r.back,
     options: r.options.length > 0 ? r.options.split('\n') : [], answer: r.answer, tags: parseTagsColumn(r.tags),
   }));
   return exportYaml(deck, cards);
@@ -53,7 +53,8 @@ function exportFrom(db: DatabaseSync, deckId: number): string {
 /** 两张卡内容一致(id 另外比) */
 function sameCard(a: ParsedCard, b: ParsedCard): string {
   const fields: [string, string, string][] = [
-    ['type', `${a.type}`, `${b.type}`], ['title', a.title, b.title], ['front', a.front, b.front],
+    ['type', `${a.type}`, `${b.type}`], ['kind', a.kind, b.kind], ['title', a.title, b.title],
+    ['front', a.front, b.front],
     ['back', a.back, b.back], ['options', a.options.join('|'), b.options.join('|')], ['answer', a.answer, b.answer],
     ['tags', a.tags.join('|'), b.tags.join('|')],
   ];
@@ -225,6 +226,40 @@ check('没有前缀的旧 uuid 原样', cardIdOf('D', 'n-mh3k2x-8f1a') === 'n-mh
 check('别的牌组的前缀:不合法字符换成 -', cardIdOf('D', 'E/c-1') === 'E-c-1');
 check('选项去掉字母前缀', optionText('C. 队列') === '队列' && optionText('无前缀') === '无前缀');
 check('坏的 tags 列当空列表', parseTagsColumn('not json').length === 0 && parseTagsColumn('').length === 0);
+
+// ---------------------------------------------------------------- 7
+console.log('=== 7. v2:题型往返,版本号取够用的最低 ===');
+const v2src: ParsedDeck = parseYamlDeck(['reps: 2', 'meta:', '  id: 9a1b2c3d-0000-4000-8000-0000000000aa',
+  'deck: "写作与计算"', 'cards:',
+  '  - id: e-1', '    type: qa', '    kind: essay', '    front: "论说文:题目"', '    back: "范文"', '',
+  '  - id: l-1', '    kind: long', '    front: "求极限"', '    back: "答案"', '',
+  '  - id: s-1', '    front: "没写题型"', '    back: "答"', ''].join('\n'));
+const db7 = freshDb();
+const r7 = importParsed(db7, v2src, 1);
+const text7 = exportFrom(db7, r7.deckId);
+check('**用到题型的牌组导出成 reps: 2**', text7.startsWith('reps: 2\n'), text7.split('\n')[0]);
+check('写了题型的卡导出 kind', text7.includes('    kind: essay\n') && text7.includes('    kind: long\n'));
+check('没写题型的卡不写 kind', (text7.match(/kind:/g) ?? []).length === 2);
+check('**没用到题型的牌组仍写 reps: 1**', text1.startsWith('reps: 1\n'), text1.split('\n')[0]);
+let back7: ParsedDeck | null = null;
+try {
+  back7 = parseYamlDeck(text7);
+} catch (e) {
+  check('reps: 2 的导出能解析', false, `${e}\n${text7}`);
+}
+if (back7 !== null) {
+  check('reps: 2 的导出能解析', back7.format === 2, `${back7.format}`);
+  for (let i = 0; i < v2src.cards.length; i++) {
+    const diff = sameCard(v2src.cards[i], back7.cards[i]);
+    check(`v2 卡 ${i + 1} 往返无损(含题型)`, diff === '', diff);
+  }
+  // 云同步下载走的也是 parseYamlDeck → 导入:另一台设备拿到同样的题型
+  const dev2 = freshDb();
+  importParsed(dev2, back7, 2);
+  const kinds = (dev2.prepare(`SELECT kind FROM notes ORDER BY id`).all() as { kind: string }[])
+    .map((r) => r.kind).join(',');
+  check('另一台设备(空库)导入后题型一样', kinds === 'essay,long,', kinds);
+}
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`);
 process.exit(fail === 0 ? 0 : 1);

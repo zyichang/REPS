@@ -171,12 +171,52 @@ check('牌组也没留下', one<{ n: number }>(db9, `SELECT COUNT(*) AS n FROM d
 
 // ---------------------------------------------------------------- 10
 console.log('=== 10. 内容哈希 ===');
-const h = (back: string, tags: string[]): string => contentHashOf(0, 't', 'f', back, [], '', tags);
+const h = (back: string, tags: string[]): string => contentHashOf(0, 't', 'f', back, [], '', tags, '');
 check('同内容同哈希', h('b', []) === h('b', []));
 check('改背面哈希变', h('b', []) !== h('b2', []));
 check('改标签哈希变', h('b', []) !== h('b', ['x']));
 check('字段边界不会串(ab|c ≠ a|bc)',
-  contentHashOf(0, 'ab', 'c', '', [], '', []) !== contentHashOf(0, 'a', 'bc', '', [], '', []));
+  contentHashOf(0, 'ab', 'c', '', [], '', [], '') !== contentHashOf(0, 'a', 'bc', '', [], '', [], ''));
+
+// ---------------------------------------------------------------- 11
+console.log('=== 11. 题型(kind,ADR-0008)===');
+// 金值是加题型之前那版 contentHashOf 算出来的:库里所有旧卡存的就是这种哈希
+check('**题型为空时哈希与加题型之前一样(金值 1)**',
+  contentHashOf(0, '机会成本', '什么是机会成本?', '为了得到某种东西所必须放弃的东西。', [], '', ['经济'], '')
+  === 'fc502da135f8887a');
+check('**题型为空时哈希与加题型之前一样(金值 2)**',
+  contentHashOf(1, 't', '1+1=?', '解析', ['A. 1', 'B. 2'], 'B', [], '') === 'f403c2c8078cfd7a');
+check('写了题型哈希就变',
+  contentHashOf(0, 't', 'f', 'b', [], '', [], 'essay') !== contentHashOf(0, 't', 'f', 'b', [], '', [], ''));
+check('不同题型哈希不同',
+  contentHashOf(0, 't', 'f', 'b', [], '', [], 'essay') !== contentHashOf(0, 't', 'f', 'b', [], '', [], 'long'));
+
+const MID_W = '7d0c9e1a-0000-4000-8000-000000000011';
+function v2Deck(cards: string): ParsedDeck {
+  return parseYamlDeck(`reps: 2\nmeta:\n  id: ${MID_W}\ndeck: 写作\ncards:\n${cards}`);
+}
+const E1 = `  - id: w-1\n    front: "论说文"\n    back: "范文"\n`;
+const E1k = `  - id: w-1\n    kind: essay\n    front: "论说文"\n    back: "范文"\n`;
+const db11 = freshDb();
+const r11a = importParsed(db11, v2Deck(E1), 100);
+check('第一次导入:一张新卡', r11a.added === 1, JSON.stringify(r11a));
+const noteId11 = one<{ id: number }>(db11, `SELECT id FROM notes WHERE uuid = ?`, `${MID_W}/w-1`).id;
+const cardId11 = one<{ id: number }>(db11, `SELECT id FROM cards WHERE note_id = ?`, noteId11).id;
+// 给这张卡一个排期,看重导会不会动它
+db11.exec(`INSERT INTO scheduling (card_id, stability, last_review, due, updated_at)
+           VALUES (${cardId11}, 3.5, 150, 900, 150)`);
+const kindOfNote = (): string => one<{ kind: string }>(db11, `SELECT kind FROM notes WHERE id = ?`, noteId11).kind;
+check('没写 kind:库里是空串', kindOfNote() === '');
+const r11b = importParsed(db11, v2Deck(E1k), 200);
+check('**只加了 kind 的重导:认作更新**', r11b.updated === 1 && r11b.added === 0 && r11b.unchanged === 0,
+  JSON.stringify(r11b));
+check('新题型存进去了', kindOfNote() === 'essay', kindOfNote());
+check('进度保留(排期没动)',
+  one<{ due: number }>(db11, `SELECT due FROM scheduling WHERE card_id = ?`, cardId11).due === 900);
+const r11c = importParsed(db11, v2Deck(E1k), 300);
+check('原样再导一次:什么都不改', r11c.updated === 0 && r11c.unchanged === 1, JSON.stringify(r11c));
+const r11d = importParsed(db11, v2Deck(E1), 400);
+check('去掉 kind 再导:也是更新,题型回到空串', r11d.updated === 1 && kindOfNote() === '', JSON.stringify(r11d));
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`);
 process.exit(fail === 0 ? 0 : 1);

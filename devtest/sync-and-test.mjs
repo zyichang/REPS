@@ -68,9 +68,10 @@ const FILES = [
   // 行内标记解析。ArkUI 的 Text 不认 Markdown,切片规则必须有断言兜住。
   [join(ets, 'data', 'Inline.ets'), join(here, 'Inline.ts'), []],
   // YAML 卡组导入。v1 直接产出卡片;旧格式「拼成 Quizify 文本」再交给 Quizify.ets,
-  // 所以必须和 Quizify.ets 一起同步。
+  // 所以必须和 Quizify.ets 一起同步。kind 的取值表来自 Timing.ets
   [join(ets, 'data', 'Yaml.ets'), join(here, 'Yaml.ts'), [
     ["'../model/Models'", "'./Models'"],
+    ["'../model/Timing'", "'./Timing'"],
   ]],
   // YAML 导出。export_test 把它的输出再交给 Yaml.ts 解析,断言往返一致
   [join(ets, 'data', 'YamlExport.ets'), join(here, 'YamlExport.ts'), [

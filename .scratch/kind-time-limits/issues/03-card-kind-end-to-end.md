@@ -36,3 +36,17 @@ Status: ready-for-agent
 - `.scratch/kind-time-limits/issues/02-default-limits-and-timeout.md`
 
 ## Comments
+
+### 2026-11-03 · 已完成
+
+- 解析:`reps: 2` + 卡片 `kind`;`reps: 1` 里写 `kind` 报错并提示改成 `reps: 2`;`reps` 只认 1 / 2;
+  没有 `reps` 的旧格式写 `kind` 提示加 `reps: 2`。`type: essay` 这类错误顺带提示「题型写在 kind 里」,
+  报错里「题型」改叫「卡片类型」,和 CONTEXT 一致。
+- 存储:schema v4,`notes.kind`(默认 '')。内容哈希只在题型非空时把它算进去,
+  `reimport_test` 用加题型之前算出的两个金值钉住「旧卡哈希不变」。
+- 导出:有题型的卡写 `kind`;版本号用 `formatVersionOf`(有题型才 2)。学习页按 `kindOf(type, kind)` 取上限。
+- 测试:yaml 105、reimport 53、export 62、migration 44、timing 64 条;完整测试台 26 / 26;ArkTS 构建成功,改动的文件没有新警告。
+- 模拟器:装到 issue 02 的库上,启动后 `user_version` = 4,旧笔记 `kind` 都是 ''。导入 3 张卡的 `reps: 2` 牌组,
+  库里题型是 essay / long / '';学习时写作题倒计时 24:58 起,大题 4:58 起,没写 kind 的 58s 起。
+  在浏览页编辑写作题的背面并保存后,`kind` 仍是 essay。云同步下载走同一个解析器和导入,用 export_test 第 7 节覆盖
+  (导出 → 解析 → 导进空库,题型一样)。

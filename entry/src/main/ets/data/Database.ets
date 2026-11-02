@@ -97,9 +97,9 @@ interface DeckRef {
   uuid: string;
 }
 
-/** 一张卡的内容哈希(notes.content_hash) */
+/** 一张卡的内容哈希(notes.content_hash)。题型也算内容(见 Schema.contentHashOf) */
 function cardHash(c: ParsedCard): string {
-  return contentHashOf(c.type as number, c.title, c.front, c.back, c.options, c.answer, c.tags);
+  return contentHashOf(c.type as number, c.title, c.front, c.back, c.options, c.answer, c.tags, c.kind);
 }
 
 const DOMAIN: number = 0x0A01;
@@ -403,6 +403,7 @@ export class Database {
       updated_at: now,
       content_hash: cardHash(c),
       tags: JSON.stringify(c.tags),
+      kind: c.kind,
     };
     return this.db().insertSync('notes', note);
   }
@@ -417,6 +418,7 @@ export class Database {
       return {
         note_id: rs.getLong(rs.getColumnIndex('note_id')),
         type: rs.getLong(rs.getColumnIndex('type')),
+        kind: rs.getString(rs.getColumnIndex('kind')),
         front: rs.getString(rs.getColumnIndex('front')),
         back: rs.getString(rs.getColumnIndex('back')),
         title: rs.getString(rs.getColumnIndex('title')),
@@ -802,7 +804,7 @@ export class Database {
         const c: ParsedCard = parsed.cards[u.index];
         store.executeSync(SQL_UPDATE_NOTE_CONTENT, [
           c.type as number, c.front, c.back, c.title, c.options.join('\n'), c.answer,
-          JSON.stringify(c.tags), cardHash(c), sourceFile, now, u.noteId,
+          JSON.stringify(c.tags), c.kind, cardHash(c), sourceFile, now, u.noteId,
         ] as Array<relationalStore.ValueType>);
       }
       let added = 0;
@@ -829,7 +831,7 @@ export class Database {
   }
 
   /**
-   * 把一副牌组导出成 REPS Card YAML v1 文本(Task 5)。返回 [牌组名, 文本]。
+   * 把一副牌组导出成 REPS Card YAML 文本(Task 5;用到题型时写 reps: 2,ADR-0008)。返回 [牌组名, 文本]。
    * 与桌面测试 export_test 的 exportFrom 一步一步对应;只读内容列,不碰排期与流水。
    */
   exportDeckYaml(deckId: number): string[] {
@@ -868,6 +870,7 @@ export class Database {
         cards.push({
           uuid: ns.getString(ns.getColumnIndex('uuid')),
           type: ns.getLong(ns.getColumnIndex('type')),
+          kind: ns.getString(ns.getColumnIndex('kind')),
           title: ns.getString(ns.getColumnIndex('title')),
           front: ns.getString(ns.getColumnIndex('front')),
           back: ns.getString(ns.getColumnIndex('back')),

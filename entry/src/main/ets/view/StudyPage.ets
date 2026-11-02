@@ -569,7 +569,7 @@ export struct StudyPage {
     this.cardAnswer = row.answer;
     this.cardType = row.type;
     // 必须在 startTimer 之前:计时器和倒计时都按这张卡的上限算
-    this.limitMs = defaultLimitMs(kindOf(row.type));
+    this.limitMs = defaultLimitMs(kindOf(row.type, row.kind));
     const st0: CardState | null = appStore().getDb().loadState(id);
     this.curInLearning = st0 === null
       || st0.phase === LearnPhase.New || st0.phase === LearnPhase.Learning;

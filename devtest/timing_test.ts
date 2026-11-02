@@ -7,8 +7,8 @@
  * 第 3~4 节同时是「搬家前后行为一致」的证据:上限 60 秒时,判档线必须正好是原来的 10 秒 / 30 秒。
  */
 import {
-  SEGMENT_CAP_MS, SHORT_LIMIT_MS, answerSegmentMs, choiceGrade, clampMs, countdownRed, countdownText,
-  defaultLimitMs, easyLineMs, explainSegmentMs, goodLineMs, kindOf,
+  KINDS, SEGMENT_CAP_MS, SHORT_LIMIT_MS, answerSegmentMs, choiceGrade, clampMs, countdownRed, countdownText,
+  defaultLimitMs, easyLineMs, explainSegmentMs, goodLineMs, isKind, kindOf,
 } from './Timing';
 import { Grade, NoteType } from './Models';
 
@@ -31,12 +31,19 @@ const QA: number = NoteType.QA as number;
 const CHOICE: number = NoteType.Choice as number;
 const CLOZE: number = NoteType.Cloze as number;
 
-console.log('=== 1. 题型按卡片类型推出 ===');
+console.log('=== 1. 题型:明写优先,没写按卡片类型推出 ===');
 
-check('选择卡 → 选择题', kindOf(CHOICE) === 'choice');
-check('挖空卡 → 填空题', kindOf(CLOZE) === 'blank');
-check('问答卡 → 简答题', kindOf(QA) === 'short');
-check('不认识的卡片类型按问答卡算 → 简答题', kindOf(99) === 'short');
+check('选择卡 → 选择题', kindOf(CHOICE, '') === 'choice');
+check('挖空卡 → 填空题', kindOf(CLOZE, '') === 'blank');
+check('问答卡 → 简答题', kindOf(QA, '') === 'short');
+check('不认识的卡片类型按问答卡算 → 简答题', kindOf(99, '') === 'short');
+check('**问答卡明写 essay → 写作题**', kindOf(QA, 'essay') === 'essay');
+check('问答卡明写 long → 大题', kindOf(QA, 'long') === 'long');
+check('考试填空题:问答卡明写 blank → 填空题', kindOf(QA, 'blank') === 'blank');
+check('组合不做限制:选择卡明写 long 也认', kindOf(CHOICE, 'long') === 'long');
+check('库里是认不出的值:按没写处理,不卡住学习页', kindOf(QA, 'bogus') === 'short' && kindOf(CLOZE, 'Essay') === 'blank');
+check('题型代号表就是这五个', KINDS.join(',') === 'choice,blank,short,long,essay');
+check('isKind', isKind('essay') && isKind('blank') && !isKind('') && !isKind('作文') && !isKind('ESSAY'));
 
 console.log('\n=== 2. 默认上限 ===');
 
@@ -45,8 +52,9 @@ check('填空题 60 秒', defaultLimitMs('blank') === 60 * S);
 check('简答题 60 秒', defaultLimitMs('short') === 60 * S);
 check('大题 5 分钟', defaultLimitMs('long') === 5 * MIN);
 check('写作题 25 分钟', defaultLimitMs('essay') === 25 * MIN);
-check('**三种卡片类型推出来的上限都是 60 秒**(issue 02 的现状)',
-  [CHOICE, CLOZE, QA].every((t) => defaultLimitMs(kindOf(t)) === 60 * S));
+check('**三种卡片类型推出来的上限都是 60 秒**(没写题型时)',
+  [CHOICE, CLOZE, QA].every((t) => defaultLimitMs(kindOf(t, '')) === 60 * S));
+check('明写写作题的问答卡上限 25 分钟', defaultLimitMs(kindOf(QA, 'essay')) === 25 * MIN);
 check('常量:短题上限 60 秒、看解析封顶 5 分钟', SHORT_LIMIT_MS === 60 * S && SEGMENT_CAP_MS === 5 * MIN);
 
 console.log('\n=== 3. 判档线是上限的 1/6 和 1/2 ===');
