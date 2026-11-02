@@ -22,7 +22,7 @@
  * 选择题 ;;;、完形填空 {{}}、硬换行等留给 Task 6。
  */
 
-import { NoteType } from '../model/Models';
+import { NoteType, TimeLimit } from '../model/Models';
 
 /** 一张解析出来的卡(尚未落库,所以没有 id) */
 export interface ParsedCard {
@@ -117,6 +117,11 @@ export interface ParsedDeck {
   cards: ParsedCard[];
   /** v1 的 meta 块;Quizify 与旧 YAML 恒为 emptyMeta() */
   meta: DeckMeta;
+  /**
+   * `reps: 2` 顶层 `time_limits`:各题型的答题时间上限。没写的题型用默认值;
+   * v1、旧 YAML 与 Quizify 恒为空数组(ADR-0008)
+   */
+  timeLimits: TimeLimit[];
 }
 
 /**
@@ -856,6 +861,7 @@ export function parseQuizify(text: string, fallbackDeck?: string): ParsedDeck {
     hadFrontMatter: fm.hadFrontMatter,
     cards: cards,
     meta: emptyMeta(),
+    timeLimits: [],
   };
 }
 

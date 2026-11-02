@@ -11,7 +11,7 @@
  * 执行**同一份**建表语句和同一套映射函数,不存在第二份副本。
  */
 
-import { CardState, LearnPhase } from '../model/Models';
+import { CardState, LearnPhase, TimeLimit } from '../model/Models';
 import { DAY_MS, MIN_MS } from '../srs/Srs';
 
 // ---------------------------------------------------------------- 日界
@@ -446,7 +446,7 @@ export const SQL_FILL_DECK_UUID: string =
  * 之后的每次改表都是 MIGRATIONS 里的一项。老库和新库走同一条路:DDL → 旧的按列迁移 → MIGRATIONS。
  * v2 之前的迁移(拍平 decks、补 archived、回填打卡)靠「列在不在」判断,保持原样。
  */
-export const SCHEMA_VERSION: number = 4;
+export const SCHEMA_VERSION: number = 5;
 
 export interface Migration {
   /** 跑完之后 user_version 设成它 */
@@ -520,6 +520,13 @@ export const MIGRATIONS: Migration[] = [
       `ALTER TABLE notes ADD COLUMN kind TEXT NOT NULL DEFAULT ''`,
     ],
   },
+  {
+    // v5(ADR-0008):牌组文件顶层的 time_limits,JSON 数组 [{kind, minutes}]。'[]' = 没写,全用默认上限
+    version: 5,
+    statements: [
+      `ALTER TABLE decks ADD COLUMN time_limits TEXT NOT NULL DEFAULT '[]'`,
+    ],
+  },
 ];
 
 /** 从当前版本出发还要跑哪些迁移,按版本升序 */
@@ -543,7 +550,7 @@ export const SQL_COUNT_CARDS: string = `SELECT COUNT(*) AS n FROM cards`;
 
 export const SQL_SELECT_NOTE_BY_CARD: string =
   `SELECT n.id AS note_id, n.type, n.kind, n.front, n.back, n.title, n.options, n.answer,
-          n.fingerprint, c.ordinal, d.name AS deck_name
+          n.fingerprint, c.ordinal, d.name AS deck_name, COALESCE(d.time_limits, '[]') AS deck_time_limits
      FROM cards c
      JOIN notes n ON n.id = c.note_id
      LEFT JOIN decks d ON d.id = n.deck_id
@@ -1435,6 +1442,8 @@ export interface ReviewCardRow {
   fingerprint: string;
   ordinal: number;
   deck_name: string;
+  /** 这张卡所在牌组的 time_limits 列(JSON,Schema.parseTimeLimitsColumn)。「全部牌组」一起学时每张卡各按自己的牌组 */
+  deck_time_limits: string;
 }
 
 /** 选项在库里以换行连接,取出时拆回数组。空串拆出空数组,不要拆出 [''] */
@@ -1661,9 +1670,9 @@ export const SQL_DECK_BY_UUID: string = `SELECT id, uuid FROM decks WHERE uuid =
 /** 按名字找牌组(带 uuid) */
 export const SQL_DECK_REF_BY_NAME: string = `SELECT id, uuid FROM decks WHERE name = ?`;
 
-/** 导入后写回牌组信息。参数:(tags JSON, meta JSON, version, now, deckId) */
+/** 导入后写回牌组信息。参数:(tags JSON, meta JSON, version, time_limits JSON, now, deckId) */
 export const SQL_UPDATE_DECK_INFO: string =
-  `UPDATE decks SET tags = ?, meta = ?, version = ?, updated_at = ? WHERE id = ?`;
+  `UPDATE decks SET tags = ?, meta = ?, version = ?, time_limits = ?, updated_at = ? WHERE id = ?`;
 
 /** 文件里少了几张:这副牌组现有笔记数 − 文件认领到的 */
 export function missingCount(deckNoteCount: number, plan: DeckImportPlan): number {
@@ -1673,7 +1682,7 @@ export function missingCount(deckNoteCount: number, plan: DeckImportPlan): numbe
 // ---------------------------------------------------------------- 导出(Task 5)
 
 /** 导出一副牌组的牌组信息。**只取内容列** */
-export const SQL_EXPORT_DECK: string = `SELECT name, uuid, tags, meta FROM decks WHERE id = ?`;
+export const SQL_EXPORT_DECK: string = `SELECT name, uuid, tags, meta, time_limits FROM decks WHERE id = ?`;
 
 /**
  * 导出一副牌组的全部卡片,按导入顺序。**只取内容列,不 JOIN scheduling / review_log** ——
@@ -1697,6 +1706,33 @@ export function parseTagsColumn(raw: string): string[] {
     for (const x of v as Object[]) {
       if (typeof x === 'string' && x.length > 0) {
         out.push(x as string);
+      }
+    }
+    return out;
+  } catch (e) {
+    return [];
+  }
+}
+
+/**
+ * decks.time_limits 列(JSON 文本,形如 [{"kind":"choice","minutes":2.5}])-> 数组。
+ * 旧行或坏数据一律当没写:学习页退回默认上限,不让一副牌组因为一列坏数据学不了。
+ * 题型取值不在这里校验 —— Timing.limitFor 认不出的题型自然匹配不上。
+ */
+export function parseTimeLimitsColumn(raw: string): TimeLimit[] {
+  if (raw.length === 0) {
+    return [];
+  }
+  try {
+    const v: Object = JSON.parse(raw) as Object;
+    if (!Array.isArray(v)) {
+      return [];
+    }
+    const out: TimeLimit[] = [];
+    for (const x of v as TimeLimit[]) {
+      if (x !== null && typeof x === 'object' && typeof x.kind === 'string' && typeof x.minutes === 'number'
+        && x.minutes > 0) {
+        out.push({ kind: x.kind, minutes: x.minutes });
       }
     }
     return out;

@@ -8,7 +8,7 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { clozeAnswers, renderCloze } from '../data/Quizify';
 import {
-  ReviewCardRow, ReviewedCard, TodayProgress, dayIndex, dayStart, splitOptions,
+  ReviewCardRow, ReviewedCard, TodayProgress, dayIndex, dayStart, parseTimeLimitsColumn, splitOptions,
 } from '../data/Schema';
 import { CardState, GRADE_COLOR, Grade, LearnPhase, NoteType } from '../model/Models';
 import { MarkupText } from './MarkupText';
@@ -20,8 +20,7 @@ import {
 import { L, LANG_ZH, fmt, gradeLabels, phaseLabels } from '../i18n/Strings';
 import { formatInterval, newCardState, schedule } from '../srs/Srs';
 import {
-  SHORT_LIMIT_MS, answerSegmentMs, choiceGrade, countdownRed, countdownText, defaultLimitMs, explainSegmentMs,
-  kindOf,
+  SHORT_LIMIT_MS, answerSegmentMs, choiceGrade, countdownRed, countdownText, explainSegmentMs, kindOf, limitFor,
 } from '../model/Timing';
 import { MAX_READ } from './Layout';
 import { syncNow } from '../data/SyncService';
@@ -568,8 +567,8 @@ export struct StudyPage {
     this.cardBack = row.back;
     this.cardAnswer = row.answer;
     this.cardType = row.type;
-    // 必须在 startTimer 之前:计时器和倒计时都按这张卡的上限算
-    this.limitMs = defaultLimitMs(kindOf(row.type, row.kind));
+    // 必须在 startTimer 之前:计时器和倒计时都按这张卡的上限算(牌组 time_limits 优先,没写用默认值)
+    this.limitMs = limitFor(kindOf(row.type, row.kind), parseTimeLimitsColumn(row.deck_time_limits));
     const st0: CardState | null = appStore().getDb().loadState(id);
     this.curInLearning = st0 === null
       || st0.phase === LearnPhase.New || st0.phase === LearnPhase.Learning;

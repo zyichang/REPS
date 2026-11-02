@@ -23,6 +23,17 @@ export enum Grade {
   Easy = 3
 }
 
+/**
+ * 一个题型的答题时间上限:牌组文件顶层 `time_limits` 的一项(ADR-0008)。
+ * 牌组里没写的题型用默认值(Timing.defaultLimitMs)。
+ */
+export interface TimeLimit {
+  /** 题型代号(Timing.KINDS) */
+  kind: string;
+  /** 分钟,可以是小数;大于 0、不超过 180 */
+  minutes: number;
+}
+
 /** 卡片类型:一张卡怎么作答,由数据结构决定(CONTEXT.md「卡片类型」)。和题型(Timing.Kind)是两回事 */
 export enum NoteType {
   /** 问答:正面提问,背面作答 */

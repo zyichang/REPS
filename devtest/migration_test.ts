@@ -99,9 +99,11 @@ check('笔记/卡片 uuid 没有重新生成',
   JSON.stringify(db.prepare('SELECT uuid FROM notes UNION ALL SELECT uuid FROM cards').all()) === before.uuids);
 
 const dc = cols(db, 'decks');
-for (const c of ['uuid', 'version', 'meta', 'tags', 'updated_at', 'deleted_at']) {
+for (const c of ['uuid', 'version', 'meta', 'tags', 'updated_at', 'deleted_at', 'time_limits']) {
   check(`decks 有 ${c} 列`, dc.includes(c));
 }
+check('v5:旧牌组的 time_limits 都是 [](全用默认上限)',
+  count(db, `SELECT COUNT(*) AS n FROM decks WHERE time_limits = '[]'`) === count(db, 'SELECT COUNT(*) AS n FROM decks'));
 const nc = cols(db, 'notes');
 for (const c of ['content_hash', 'tags', 'deleted_at', 'kind']) {
   check(`notes 有 ${c} 列`, nc.includes(c));

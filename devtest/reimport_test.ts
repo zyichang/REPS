@@ -218,5 +218,23 @@ check('原样再导一次:什么都不改', r11c.updated === 0 && r11c.unchanged
 const r11d = importParsed(db11, v2Deck(E1), 400);
 check('去掉 kind 再导:也是更新,题型回到空串', r11d.updated === 1 && kindOfNote() === '', JSON.stringify(r11d));
 
+// ---------------------------------------------------------------- 12
+console.log('=== 12. 牌组的 time_limits(ADR-0008)===');
+const MID_T = '7d0c9e1a-0000-4000-8000-000000000012';
+const tDeck = (block: string): ParsedDeck => parseYamlDeck(
+  `reps: 2\nmeta:\n  id: ${MID_T}\ndeck: 限时\n${block}cards:\n  - id: t-1\n    front: "甲"\n    back: "乙"\n`);
+const db12 = freshDb();
+importParsed(db12, tDeck(''), 100);
+const deckRowT = (): { time_limits: string; updated_at: number } =>
+  one<{ time_limits: string; updated_at: number }>(db12, `SELECT time_limits, updated_at FROM decks WHERE uuid = ?`, MID_T);
+check('没写 time_limits:库里是 []', deckRowT().time_limits === '[]', deckRowT().time_limits);
+const r12 = importParsed(db12, tDeck('time_limits:\n  choice: 2.5\n'), 200);
+check('**改了 time_limits 的重导:覆盖值更新**', deckRowT().time_limits === '[{"kind":"choice","minutes":2.5}]',
+  deckRowT().time_limits);
+check('牌组 updated_at 变了(同步靠它把牌组文件重新传上去)', deckRowT().updated_at === 200, `${deckRowT().updated_at}`);
+check('卡片没变:不算卡片更新', r12.updated === 0 && r12.unchanged === 1, JSON.stringify(r12));
+importParsed(db12, tDeck(''), 300);
+check('文件里删掉 time_limits 再导:覆盖值清空', deckRowT().time_limits === '[]', deckRowT().time_limits);
+
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`);
 process.exit(fail === 0 ? 0 : 1);

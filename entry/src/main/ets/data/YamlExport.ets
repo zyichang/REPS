@@ -5,7 +5,7 @@
  * **纯逻辑,不 import 任何 @kit.\*** —— 桌面测试 export_test 把导出结果再交给 parseYamlDeck,
  * 断言逐字段往返一致。写文件、弹分享面板在 Database / ExportAction 里。
  *
- * 只写内容字段(reps / meta / deck / tags / cards)。**排期、作答流水、打卡、设备 id 一样都不写** ——
+ * 只写内容字段(reps / meta / deck / tags / time_limits / cards)。**排期、作答流水、打卡、设备 id 一样都不写** ——
  * 函数的输入里压根没有这些数据,这是隐私的结构性保证,不靠「记得别写」。
  *
  * 写法规则(都是为了让我们自己的严格解析器原样读回来):
@@ -15,7 +15,7 @@
  *   - title 等于正面首行(没写 title 时的默认值)就不写,文件保持干净。
  */
 
-import { NoteType } from '../model/Models';
+import { NoteType, TimeLimit } from '../model/Models';
 import { DeckMeta } from './Quizify';
 import { fallbackTitle } from './Yaml';
 
@@ -26,6 +26,8 @@ export interface ExportDeck {
   uuid: string;
   tags: string[];
   meta: DeckMeta;
+  /** 顶层 time_limits;空数组就不写 */
+  timeLimits: TimeLimit[];
 }
 
 /** 要导出的一张卡(库里的原样) */
@@ -129,17 +131,24 @@ function metaLines(deck: ExportDeck): string[] {
 
 /**
  * 这副牌组要写成哪个格式版本:**够用的最低版本**(ADR-0008)。
- * 用到 v2 字段(卡片的 kind)才写 reps: 2,否则照旧 reps: 1,旧版 App 还能读。
+ * 用到 v2 字段(牌组的 time_limits、卡片的 kind)才写 reps: 2,否则照旧 reps: 1,旧版 App 还能读。
  */
-export function formatVersionOf(cards: ExportCard[]): number {
-  return cards.some((c: ExportCard) => c.kind.length > 0) ? 2 : 1;
+export function formatVersionOf(deck: ExportDeck, cards: ExportCard[]): number {
+  return deck.timeLimits.length > 0 || cards.some((c: ExportCard) => c.kind.length > 0) ? 2 : 1;
 }
 
 /** 整副牌组 -> YAML 文本(以换行结尾) */
 export function exportYaml(deck: ExportDeck, cards: ExportCard[]): string {
-  const out: string[] = [`reps: ${formatVersionOf(cards)}`, ...metaLines(deck), `deck: ${dq(deck.name)}`];
+  const out: string[] = [`reps: ${formatVersionOf(deck, cards)}`, ...metaLines(deck), `deck: ${dq(deck.name)}`];
   if (deck.tags.length > 0) {
     out.push(`tags: ${inlineList(deck.tags)}`);
+  }
+  if (deck.timeLimits.length > 0) {
+    out.push('time_limits:');
+    for (const t of deck.timeLimits) {
+      // 分钟原样写回:2.5 就是 2.5,30 就是 30(数字的默认字符串形式就是最短的往返写法)
+      out.push(`  ${t.kind}: ${t.minutes}`);
+    }
   }
   out.push('cards:');
   for (const c of cards) {

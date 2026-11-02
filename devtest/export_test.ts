@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { SQL_EXPORT_DECK, SQL_EXPORT_NOTES, parseTagsColumn } from './Schema';
+import { SQL_EXPORT_DECK, SQL_EXPORT_NOTES, parseTagsColumn, parseTimeLimitsColumn } from './Schema';
 import { DeckMeta, ParsedCard, ParsedDeck, emptyMeta, parseQuizify } from './Quizify';
 import { parseYamlDeck } from './Yaml';
 import { ExportCard, ExportDeck, cardIdOf, exportYaml, optionText } from './YamlExport';
@@ -33,12 +33,17 @@ function check(name: string, ok: boolean, detail?: string): void {
 
 /** 与 Database.exportDeckYaml 对应:生产 SQL 取行 → exportYaml */
 function exportFrom(db: DatabaseSync, deckId: number): string {
-  const d = db.prepare(SQL_EXPORT_DECK).get(deckId) as { name: string; uuid: string; tags: string; meta: string };
+  const d = db.prepare(SQL_EXPORT_DECK).get(deckId) as {
+    name: string; uuid: string; tags: string; meta: string; time_limits: string;
+  };
   let meta: DeckMeta = emptyMeta();
   if (d.meta.length > 0) {
     meta = { ...emptyMeta(), ...(JSON.parse(d.meta) as DeckMeta) };
   }
-  const deck: ExportDeck = { name: d.name, uuid: d.uuid, tags: parseTagsColumn(d.tags), meta: meta };
+  const deck: ExportDeck = {
+    name: d.name, uuid: d.uuid, tags: parseTagsColumn(d.tags), meta: meta,
+    timeLimits: parseTimeLimitsColumn(d.time_limits),
+  };
   const rows = db.prepare(SQL_EXPORT_NOTES).all(deckId) as {
     uuid: string; type: number; kind: string; title: string; front: string; back: string; options: string;
     answer: string; tags: string;
@@ -226,6 +231,11 @@ check('没有前缀的旧 uuid 原样', cardIdOf('D', 'n-mh3k2x-8f1a') === 'n-mh
 check('别的牌组的前缀:不合法字符换成 -', cardIdOf('D', 'E/c-1') === 'E-c-1');
 check('选项去掉字母前缀', optionText('C. 队列') === '队列' && optionText('无前缀') === '无前缀');
 check('坏的 tags 列当空列表', parseTagsColumn('not json').length === 0 && parseTagsColumn('').length === 0);
+check('坏的 time_limits 列当没写', parseTimeLimitsColumn('not json').length === 0 &&
+  parseTimeLimitsColumn('').length === 0 && parseTimeLimitsColumn('{"choice":2}').length === 0 &&
+  parseTimeLimitsColumn('[{"kind":"choice"}]').length === 0 && parseTimeLimitsColumn('[{"kind":"choice","minutes":0}]').length === 0);
+check('好的 time_limits 列', JSON.stringify(parseTimeLimitsColumn('[{"kind":"choice","minutes":2.5}]')) ===
+  '[{"kind":"choice","minutes":2.5}]');
 
 // ---------------------------------------------------------------- 7
 console.log('=== 7. v2:题型往返,版本号取够用的最低 ===');
@@ -259,6 +269,28 @@ if (back7 !== null) {
   const kinds = (dev2.prepare(`SELECT kind FROM notes ORDER BY id`).all() as { kind: string }[])
     .map((r) => r.kind).join(',');
   check('另一台设备(空库)导入后题型一样', kinds === 'essay,long,', kinds);
+}
+
+// ---------------------------------------------------------------- 8
+console.log('=== 8. v2:牌组的 time_limits 往返 ===');
+const tlsrc: ParsedDeck = parseYamlDeck(['reps: 2', 'meta:', '  id: 9a1b2c3d-0000-4000-8000-0000000000bb',
+  'deck: "限时"', 'time_limits:', '  choice: 2.5', '  essay: 30', 'cards:',
+  '  - id: c-1', '    front: "甲"', '    back: "乙"', ''].join('\n'));
+const db8 = freshDb();
+const r8 = importParsed(db8, tlsrc, 1);
+const text8 = exportFrom(db8, r8.deckId);
+check('**只用了 time_limits(没有 kind)也写 reps: 2**', text8.startsWith('reps: 2\n'), text8.split('\n')[0]);
+check('time_limits 原样写回(2.5 还是 2.5,30 还是 30)', text8.includes('time_limits:\n  choice: 2.5\n  essay: 30\n'), text8);
+let back8: ParsedDeck | null = null;
+try {
+  back8 = parseYamlDeck(text8);
+} catch (e) {
+  check('带 time_limits 的导出能解析', false, `${e}\n${text8}`);
+}
+if (back8 !== null) {
+  check('带 time_limits 的导出能解析', back8.format === 2);
+  check('time_limits 往返一致', JSON.stringify(back8.timeLimits) === JSON.stringify(tlsrc.timeLimits),
+    JSON.stringify(back8.timeLimits));
 }
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`);

@@ -94,7 +94,7 @@ export function importParsed(db: DatabaseSync, parsed: ParsedDeck, now: number, 
         .run(Number(r.lastInsertRowid), uuid, now);
     }
     db.prepare(SQL_UPDATE_DECK_INFO).run(JSON.stringify(parsed.tags), JSON.stringify(parsed.meta),
-      parsed.meta.version, now, deckId);
+      parsed.meta.version, JSON.stringify(parsed.timeLimits ?? []), now, deckId);
     db.exec('COMMIT');
     return {
       added: plan.fresh.length, updated: plan.updates.length, unchanged: plan.unchanged,

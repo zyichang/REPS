@@ -7,8 +7,8 @@
  * 第 3~4 节同时是「搬家前后行为一致」的证据:上限 60 秒时,判档线必须正好是原来的 10 秒 / 30 秒。
  */
 import {
-  KINDS, SEGMENT_CAP_MS, SHORT_LIMIT_MS, answerSegmentMs, choiceGrade, clampMs, countdownRed, countdownText,
-  defaultLimitMs, easyLineMs, explainSegmentMs, goodLineMs, isKind, kindOf,
+  KINDS, MAX_LIMIT_MINUTES, SEGMENT_CAP_MS, SHORT_LIMIT_MS, answerSegmentMs, choiceGrade, clampMs, countdownRed,
+  countdownText, defaultLimitMs, easyLineMs, explainSegmentMs, goodLineMs, isKind, kindOf, limitFor,
 } from './Timing';
 import { Grade, NoteType } from './Models';
 
@@ -130,6 +130,25 @@ check('一张选择题的学习时长 = 20 秒答题 + 5 分钟解析(上限)',
   answerSegmentMs(20 * S, L60) + explainSegmentMs(20 * MIN) === 20 * S + 5 * MIN);
 check('一张超时的问答卡 = 60 秒 + 看解析(最多 5 分钟)',
   answerSegmentMs(61 * S, L60) + explainSegmentMs(2 * MIN) === 60 * S + 2 * MIN);
+
+console.log('\n=== 10. 牌组覆盖值(time_limits)===');
+
+const OV = [{ kind: 'choice', minutes: 2.5 }, { kind: 'essay', minutes: 30 }];
+check('覆盖了选择题 → 2.5 分钟', limitFor('choice', OV) === 150 * S, `${limitFor('choice', OV)}`);
+check('覆盖了写作题 → 30 分钟', limitFor('essay', OV) === 30 * MIN);
+check('没覆盖的题型用默认值', limitFor('long', OV) === 5 * MIN && limitFor('short', OV) === 60 * S &&
+  limitFor('blank', OV) === 60 * S);
+check('没有覆盖值 = 全用默认值', limitFor('essay', []) === 25 * MIN && limitFor('choice', []) === 60 * S);
+check('库里的坏值(0、负数)按没写处理', limitFor('choice', [{ kind: 'choice', minutes: 0 }]) === 60 * S &&
+  limitFor('choice', [{ kind: 'choice', minutes: -3 }]) === 60 * S);
+check('库里超过 180 分钟的坏值按 180 算', limitFor('essay', [{ kind: 'essay', minutes: 999 }]) === 180 * MIN);
+check('认不出的题型键匹配不上', limitFor('choice', [{ kind: 'Choice', minutes: 5 }]) === 60 * S);
+const L25 = limitFor('choice', OV);
+check('**2.5 分钟的选择题:75 秒答对是良好,76 秒是困难**',
+  choiceGrade(true, 75 * S, L25, false) === Grade.Good && choiceGrade(true, 76 * S, L25, false) === Grade.Hard);
+check('**倒计时 75 秒变红,74 秒还不红**', countdownRed(CHOICE, 75 * S, L25) && !countdownRed(CHOICE, 74 * S, L25));
+check('2.5 分钟的倒计时从 2:30 开始', countdownText(L25, '秒') === '2:30');
+check('上限常量是 180 分钟', MAX_LIMIT_MINUTES === 180);
 
 console.log(`\n===== 结果: ${pass} 通过 / ${fail} 失败 =====`);
 if (fail > 0) {

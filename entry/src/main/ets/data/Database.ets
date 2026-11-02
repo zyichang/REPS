@@ -39,7 +39,7 @@ import {
   DeckImportPlan, ExistingNote, ImportCardInput, SQL_DECK_BY_UUID,
   SQL_DECK_REF_BY_NAME, SQL_NOTE_BY_FP_IN_DECK, SQL_NOTE_BY_UUID_IN_DECK, SQL_UPDATE_DECK_INFO,
   SQL_UPDATE_NOTE_CONTENT, contentHashOf, missingCount, noteUuidOf, planDeckImport,
-  SQL_EXPORT_DECK, SQL_EXPORT_NOTES, parseTagsColumn,
+  SQL_EXPORT_DECK, SQL_EXPORT_NOTES, parseTagsColumn, parseTimeLimitsColumn,
   DailyStatRow, META_DEVICE_ID, SQL_META_VALUE, SQL_REMOTE_DAY_STATS, SQL_UPSERT_REMOTE_DAY_STAT,
   mergeDayStats, SQL_TOMBSTONE_DECK, SQL_TOMBSTONE_DECK_CARDS, SQL_TOMBSTONE_DECK_SCHED,
   SQL_TOMBSTONE_NOTE_CARDS, SQL_SYNC_CHECKINS_SINCE, SQL_SYNC_CHECKIN_TS, SQL_SYNC_DAYS_SINCE,
@@ -427,6 +427,7 @@ export class Database {
         fingerprint: rs.getString(rs.getColumnIndex('fingerprint')),
         ordinal: rs.getLong(rs.getColumnIndex('ordinal')),
         deck_name: rs.getString(rs.getColumnIndex('deck_name')),
+        deck_time_limits: rs.getString(rs.getColumnIndex('deck_time_limits')),
       };
     } finally {
       rs.close();
@@ -816,7 +817,8 @@ export class Database {
         added += ids.length;
       }
       store.executeSync(SQL_UPDATE_DECK_INFO, [
-        JSON.stringify(parsed.tags), JSON.stringify(parsed.meta), parsed.meta.version, now, deck.id,
+        JSON.stringify(parsed.tags), JSON.stringify(parsed.meta), parsed.meta.version,
+        JSON.stringify(parsed.timeLimits), now, deck.id,
       ] as Array<relationalStore.ValueType>);
       store.commit();
       return {
@@ -858,6 +860,7 @@ export class Database {
         uuid: rs.getString(rs.getColumnIndex('uuid')),
         tags: parseTagsColumn(rs.getString(rs.getColumnIndex('tags'))),
         meta: meta,
+        timeLimits: parseTimeLimitsColumn(rs.getString(rs.getColumnIndex('time_limits'))),
       };
     } finally {
       rs.close();

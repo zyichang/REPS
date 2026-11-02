@@ -353,6 +353,34 @@ expectError('**reps: 1 里写了 kind:报错,提示改成 reps: 2**',
 expectError('没有 reps 的旧格式写了 kind:提示加 reps: 2',
   `deck: 测试\ncards:\n  - front: "甲"\n    back: "乙"\n    kind: essay\n`, 5, 'reps: 2');
 
+console.log('\n=== 12. v2:牌组的 time_limits(ADR-0008)===');
+
+// 第 1 行 reps,第 2 行 deck,第 3 行起是 block,之后是 cards
+const TL = (block: string): string => `reps: 2\ndeck: 测试\n${block}cards:\n  - front: "甲"\n    back: "乙"\n`;
+const tl: ParsedDeck = parseYamlDeck(TL('time_limits:\n  choice: 2.5\n  essay: 30\n'));
+check('time_limits 读对了(分钟,可以是小数)',
+  JSON.stringify(tl.timeLimits) === '[{"kind":"choice","minutes":2.5},{"kind":"essay","minutes":30}]',
+  JSON.stringify(tl.timeLimits));
+check('没写 time_limits 就是空数组', parseYamlDeck(V2 + `  - front: "甲"\n    back: "乙"\n`).timeLimits.length === 0);
+check('reps: 1 的牌组 time_limits 为空', parseYamlDeck(H + `  - front: "甲"\n    back: "乙"\n`).timeLimits.length === 0);
+check('写在 deck 前面也行', parseYamlDeck(
+  `reps: 2\ntime_limits:\n  long: 10\ndeck: 测试\ncards:\n  - front: "甲"\n    back: "乙"\n`).timeLimits[0].minutes === 10);
+check('0.5 分钟、180 分钟都行', parseYamlDeck(TL('time_limits:\n  blank: 0.5\n  essay: 180\n')).timeLimits
+  .map((t) => t.minutes).join(',') === '0.5,180');
+check('块里可以有注释和空行', parseYamlDeck(TL('time_limits:\n  # 199 数学\n\n  choice: 2.5\n')).timeLimits.length === 1);
+expectError('不认识的题型', TL('time_limits:\n  big: 3\n'), 4, 'big');
+expectError('题型写了两次', TL('time_limits:\n  choice: 2\n  choice: 3\n'), 5, 'choice');
+expectError('0 分钟', TL('time_limits:\n  choice: 0\n'), 4, '大于 0');
+expectError('负数', TL('time_limits:\n  choice: -1\n'), 4, '-1');
+expectError('超过 180 分钟', TL('time_limits:\n  essay: 181\n'), 4, '180');
+expectError('带单位', TL('time_limits:\n  choice: 2m\n'), 4, '2m');
+expectError('空块', TL('time_limits:\n'), 3, 'time_limits');
+expectError('time_limits: 后面直接写了值', TL('time_limits: 3\n'), 3, '换行');
+expectError('**reps: 1 里写了 time_limits:提示改成 reps: 2**',
+  `reps: 1\ndeck: 测试\ntime_limits:\n  choice: 2\ncards:\n  - front: "甲"\n    back: "乙"\n`, 3, 'reps: 2');
+expectError('没有 reps 的旧格式写了 time_limits:提示加 reps: 2',
+  `deck: 测试\ntime_limits:\n  choice: 2\ncards:\n  - front: "甲"\n    back: "乙"\n`, 2, 'reps: 2');
+
 console.log(`\n===== 结果: ${pass} 通过 / ${fail} 失败 =====`);
 if (fail > 0) {
   process.exit(1);

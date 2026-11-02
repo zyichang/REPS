@@ -34,3 +34,18 @@ Status: ready-for-agent
 - `.scratch/kind-time-limits/issues/03-card-kind-end-to-end.md`
 
 ## Comments
+
+### 2026-11-03 · 已完成
+
+- 解析:顶层 `time_limits`(和 `deck` 同级,位置不限),每行 `题型: 分钟`;不认识的题型、写两次、0、负数、
+  超过 180、带单位、空块、`time_limits:` 后面直接写值,都报错并带行号;`reps: 1` 里写它提示改成 `reps: 2`,
+  没有 `reps` 的旧格式写它提示加 `reps: 2`。`TimeLimit {kind, minutes}` 放在 Models 里,解析器、导出、计时规则共用。
+- 存储:schema v5,`decks.time_limits`(JSON 数组,默认 `[]`);导入时随牌组信息一起写,updated_at 照旧更新。
+  复习取卡的查询带上这张卡所在牌组的 `time_limits`,「全部牌组」一起学时每张卡按自己的牌组取上限。
+- 计时规则:`limitFor(题型, 覆盖值)`;覆盖值里的坏值按没写处理,超过 180 按 180 算。判档线沿用 issue 01 的 1/6、1/2。
+- 导出:有覆盖值就写 `time_limits` 块,分钟原样写回;只用了 `time_limits` 也写 `reps: 2`。
+- 测试:yaml 121、reimport 68、export 68、migration 46、timing 75 条;完整测试台 26 / 26;构建成功,改动的文件没有新警告。
+- 模拟器:装到 v4 的库上,启动后 `user_version` = 5,旧牌组 `time_limits` = `[]`。导入 `choice: 2.5`、`essay: 30` 的牌组:
+  - 选择题倒计时 2:29 起;剩 1:18(已过 72 秒)时还是灰的,剩 1:10(已过 80 秒)时是红的 —— 良好线在 75 秒;
+    第 117.7 秒答对评「困难」。
+  - 写作题倒计时 29:58 起(覆盖成 30 分钟);牌组没写的大题仍是默认 5 分钟(4:58 起)。

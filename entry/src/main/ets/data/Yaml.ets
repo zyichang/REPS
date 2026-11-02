@@ -27,8 +27,8 @@
  * 报错时一律给出 YAML 里的行号,而不是转换后文本的行号。
  */
 
-import { NoteType } from '../model/Models';
-import { KINDS, isKind } from '../model/Timing';
+import { NoteType, TimeLimit } from '../model/Models';
+import { KINDS, MAX_LIMIT_MINUTES, isKind } from '../model/Timing';
 import {
   DeckMeta, ParsedCard, ParsedDeck, QuizifyError, cardKeyOf, clozeAnswers, emptyMeta, parseQuizify,
 } from './Quizify';
@@ -392,6 +392,11 @@ function parseLegacy(lines: string[]): ParsedDeck {
         }
         continue;
       }
+      if (key === 'time_limits') {
+        throw new QuizifyError(
+          m('time_limits 是 REPS YAML v2 的字段。要用它,请在文件第一行加上 reps: 2',
+          'time_limits is a REPS YAML v2 field. To use it, add reps: 2 as the first line of the file'), i + 1);
+      }
       throw new QuizifyError(m(`不认识的顶层字段 ${key}。只认 deck / tags / cards`,
         `Unknown top-level field ${key}. Only deck / tags / cards are accepted`), i + 1);
     }
@@ -494,7 +499,7 @@ const V1_CARD_FIELDS: string[] = ['id', 'type', 'kind', 'title', 'front', 'back'
 const V1_META_FIELDS: string[] = [
   'id', 'version', 'author', 'language', 'license', 'description', 'source', 'generated_by',
 ];
-const V1_TOP_FIELDS: string[] = ['reps', 'meta', 'deck', 'tags', 'cards'];
+const V1_TOP_FIELDS: string[] = ['reps', 'meta', 'deck', 'tags', 'time_limits', 'cards'];
 const CARD_ID_RE: RegExp = /^[A-Za-z0-9-]+$/;
 
 function newVal(kind: ValKind, line: number, next: number): Val {
@@ -710,6 +715,68 @@ function readMeta(lines: string[], i: number): MetaEntry[] {
     const v: Val = readValue(lines, j, t.substring(t.indexOf(':') + 1), ind, key);
     out.push({ key: key, val: v });
     j = v.next;
+  }
+  return out;
+}
+
+/** time_limits 的值:分钟数,整数或小数,如 2.5 / 30 */
+const MINUTES_RE: RegExp = /^\d+(\.\d+)?$/;
+
+/**
+ * 读 time_limits 块(顶层 `time_limits:` 下面缩进的若干 `题型: 分钟`,ADR-0008)。
+ * 键只能是题型代号,每个最多写一次;值是分钟,大于 0、不超过 180。没写到的题型用默认上限。
+ */
+function readTimeLimits(lines: string[], i: number): TimeLimit[] {
+  const out: TimeLimit[] = [];
+  let j = i + 1;
+  while (j < lines.length) {
+    const ln = lines[j];
+    if (isBlank(ln) || isComment(ln)) {
+      j++;
+      continue;
+    }
+    const ind = indentOf(ln);
+    if (ind === 0) {
+      break;
+    }
+    if (hasTab(ln)) {
+      throw new QuizifyError(m('YAML 不允许用 Tab 缩进,请改成空格', 'YAML does not allow tab indentation; use spaces'), j + 1);
+    }
+    const t = ln.trim();
+    const key = keyOf(t);
+    if (key.length === 0) {
+      throw new QuizifyError(m('看不懂这一行:time_limits 里每一行都是 题型: 分钟,如 choice: 2.5',
+        'Cannot read this line: each line in time_limits is kind: minutes, e.g. choice: 2.5'), j + 1);
+    }
+    if (!isKind(key)) {
+      throw new QuizifyError(
+        m(`time_limits 里不认识的题型 ${key}。只认 ${KINDS.join(' / ')}`,
+        `Unknown question kind ${key} in time_limits. Only ${KINDS.join(' / ')} are accepted`), j + 1);
+    }
+    for (const prev of out) {
+      if (prev.kind === key) {
+        throw new QuizifyError(m(`time_limits 里 ${key} 写了两次`, `time_limits has ${key} twice`), j + 1);
+      }
+    }
+    const v: Val = readValue(lines, j, t.substring(t.indexOf(':') + 1), ind, key);
+    const s: string = wordOf(v, `time_limits.${key}`);
+    if (!MINUTES_RE.test(s)) {
+      throw new QuizifyError(m(`time_limits.${key} 写分钟数(可以是小数),如 2.5,不能是 ${s}`,
+        `time_limits.${key} is a number of minutes (decimals allowed), e.g. 2.5, not ${s}`), v.line);
+    }
+    const minutes: number = Number(s);
+    if (minutes <= 0 || minutes > MAX_LIMIT_MINUTES) {
+      throw new QuizifyError(
+        m(`time_limits.${key} 要大于 0、不超过 ${MAX_LIMIT_MINUTES} 分钟(一整场考试),不能是 ${s}`,
+        `time_limits.${key} must be more than 0 and at most ${MAX_LIMIT_MINUTES} minutes (a whole exam), not ${s}`),
+        v.line);
+    }
+    out.push({ kind: key, minutes: minutes });
+    j = v.next;
+  }
+  if (out.length === 0) {
+    throw new QuizifyError(m('time_limits 下面一项都没有。不需要的话整块删掉',
+      'time_limits has no entries. Delete the whole block if you do not need it'), i + 1);
   }
   return out;
 }
@@ -1021,8 +1088,11 @@ function parseV1(lines: string[]): ParsedDeck {
   let meta: DeckMeta = emptyMeta();
   let raws: RawV1Card[] = [];
   let sawCards = false;
-  /** reps: 1 或 2。用到 v2 字段(kind)的文件必须写 2(ADR-0008) */
+  /** reps: 1 或 2。用到 v2 字段(kind、time_limits)的文件必须写 2(ADR-0008) */
   let version = 1;
+  /** 顶层 time_limits:各题型的上限(分钟)。没写的题型用默认值 */
+  let timeLimits: TimeLimit[] = [];
+  let timeLimitsLine = 0;
   const seenTop: string[] = [];
 
   let i = 0;
@@ -1077,6 +1147,18 @@ function parseV1(lines: string[]): ParsedDeck {
       const entries: MetaEntry[] = readMeta(lines, i);
       meta = buildMeta(entries);
       i = entries.length > 0 ? entries[entries.length - 1].val.next : i + 1;
+    } else if (key === 'time_limits') {
+      if (rest.trim().length > 0) {
+        throw new QuizifyError(m('time_limits: 后面直接换行,下面缩进写 题型: 分钟,如 choice: 2.5',
+          'Put a newline after time_limits:, then indent kind: minutes lines, e.g. choice: 2.5'), i + 1);
+      }
+      timeLimits = readTimeLimits(lines, i);
+      timeLimitsLine = i + 1;
+      let j = i + 1;
+      while (j < lines.length && (isBlank(lines[j]) || isComment(lines[j]) || indentOf(lines[j]) > 0)) {
+        j++;
+      }
+      i = j;
     } else {
       // cards
       if (rest.trim().length > 0) {
@@ -1098,6 +1180,10 @@ function parseV1(lines: string[]): ParsedDeck {
   }
   if (!sawCards || raws.length === 0) {
     throw new QuizifyError(m('cards 下面一张卡都没有', 'No cards listed under cards'), deckLine);
+  }
+  if (version < 2 && timeLimits.length > 0) {
+    throw new QuizifyError(m('time_limits 是 reps: 2 的字段。要用它,请把文件开头的 reps: 1 改成 reps: 2',
+      'time_limits is a reps: 2 field. To use it, change reps: 1 at the top of the file to reps: 2'), timeLimitsLine);
   }
 
   const cards: ParsedCard[] = [];
@@ -1138,5 +1224,6 @@ function parseV1(lines: string[]): ParsedDeck {
     hadFrontMatter: true,
     cards: cards,
     meta: meta,
+    timeLimits: timeLimits,
   };
 }

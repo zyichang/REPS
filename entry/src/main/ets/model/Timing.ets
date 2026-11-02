@@ -6,7 +6,7 @@
  *
  * 术语见 CONTEXT.md:卡片类型、题型、超时、答题时长 / 学习时长。设计见 .scratch/kind-time-limits/PRD.md。
  */
-import { Grade, NoteType } from './Models';
+import { Grade, NoteType, TimeLimit } from './Models';
 
 /**
  * 题型:这张卡在考试里属于哪一类题。只决定答题时间的上限(以及以后的「忘了之后当天还出不出现」),
@@ -89,6 +89,22 @@ export function defaultLimitMs(kind: Kind): number {
     return ESSAY_LIMIT_MS;
   }
   return SHORT_LIMIT_MS;
+}
+
+/** 牌组文件里一个题型的上限最多写多少分钟:一整场考试的长度 */
+export const MAX_LIMIT_MINUTES: number = 180;
+
+/**
+ * 这张卡的答题时间上限(毫秒):牌组 `time_limits` 里写了这个题型就用它,没写就用默认值。
+ * 覆盖值导入时已经校验过;万一库里有坏值(不是正数),也按没写处理。
+ */
+export function limitFor(kind: Kind, overrides: TimeLimit[]): number {
+  for (const o of overrides) {
+    if (o.kind === kind && o.minutes > 0) {
+      return Math.min(o.minutes, MAX_LIMIT_MINUTES) * MINUTE;
+    }
+  }
+  return defaultLimitMs(kind);
 }
 
 /** 不超过它答对算「简单」 */
