@@ -353,6 +353,13 @@ export const SQL_INSERT_LOG: string =
   `VALUES (${LOG_COLUMNS.map(() => '?').join(', ')})`;
 
 /**
+ * 改写一次作答的学习时长。选择题判完当场落库,离开那张卡时才知道看了多久解析(StudyPage.finishCard)。
+ * 按 (card_id, ts) 定位那一次作答:同一张卡不可能在同一毫秒答两次;card_id 有索引。
+ */
+export const SQL_SET_LOG_COST: string =
+  `UPDATE review_log SET cost_ms = ? WHERE card_id = ? AND ts = ?`;
+
+/**
  * 今日集合的取卡语句(Task 8 会在外层加上限与新卡额度)。
  *
  * 注意 due <= ? 用的是 now,**不是**日界 —— 见 DAY_CUTOFF_HOUR 的说明。

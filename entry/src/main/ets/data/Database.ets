@@ -27,7 +27,7 @@ import {
   SQL_DELETE_DECK_SCHED, SQL_DELETE_NOTE, SQL_DELETE_NOTE_CARDS,
   SQL_DELETE_NOTE_SCHED, SQL_DUE_CARDS, SQL_DUE_CARDS_IN_DECK, SQL_DUE_FORECAST,
   SQL_DUE_FORECAST_IN_DECK, SQL_HAS_PARENT_COL,
-  SQL_INSERT_LOG, SQL_LIST_CARDS_ALL, SQL_LIST_CARDS_IN_DECK, SQL_LIST_DECKS,
+  SQL_INSERT_LOG, SQL_SET_LOG_COST, SQL_LIST_CARDS_ALL, SQL_LIST_CARDS_IN_DECK, SQL_LIST_DECKS,
   SQL_LOG_SINCE, SQL_NEW_CARDS, SQL_NEW_CARDS_IN_DECK, SQL_NEW_INTRODUCED_TODAY,
   SQL_RETENTION_ALL, SQL_REVIEWED_TODAY, SQL_SELECT_DECK_ID, SQL_SELECT_DECK_NAME,
   SQL_SELECT_NOTE_BY_CARD, SQL_SELECT_SCHEDULING, SQL_STABILITY_HISTOGRAM,
@@ -318,13 +318,21 @@ export class Database {
 
   // ------------------------------------------------------------ 复习流水
 
-  /** 追加一条复习记录。只写不改 */
+  /** 追加一条复习记录。只写不改,唯一的例外是 setReviewCost 补记学习时长 */
   logReview(log: ReviewLog): void {
     const algo: string = isValidAlgo(log.algo) ? log.algo : 'fsrs';
     this.db().executeSync(SQL_INSERT_LOG, [
       log.cardId, log.ts, log.grade, log.stabilityBefore, log.elapsedDays,
       log.retrievability, log.intervalDays, log.costMs, algo,
     ] as Array<relationalStore.ValueType>);
+  }
+
+  /**
+   * 改写某次作答的学习时长(cost_ms)。只动这一列 ——
+   * 选择题判完就落库,看解析的时间要等离开那张卡才知道,由学习页补进来。
+   */
+  setReviewCost(cardId: number, ts: number, costMs: number): void {
+    this.db().executeSync(SQL_SET_LOG_COST, [costMs, cardId, ts] as Array<relationalStore.ValueType>);
   }
 
   // ------------------------------------------------------------ 取卡

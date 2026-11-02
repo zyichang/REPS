@@ -38,6 +38,16 @@ const TAG: string = 'REPS-Study';
 const T_EASY_MS: number = 10 * 1000;
 const T_GOOD_MS: number = 30 * 1000;
 const T_MAX_MS: number = 60 * 1000;
+/**
+ * 学习时长的保底:**每一段最多计 5 分钟**。超出的部分不计,但**不自动翻页**。
+ *
+ * 一张卡分两段:答题(出现 → 作答 / 超时 / 不知道 / 显示答案)和看解析(揭示答案 → 离开这张卡)。
+ *   - 看解析:任何卡都用它封顶;
+ *   - 答题:问答 / 挖空没有超时,用它封顶;选择题由 T_MAX_MS 封顶。
+ * 难题看 20 分钟解析是正常的,少记 15 分钟无所谓。它防的是开着没关、睡着了,
+ * 把某一天记成 10 个小时。
+ */
+const SEGMENT_CAP_MS: number = 5 * 60 * 1000;
 /** 计时器步长。250ms 足够让秒数看起来连续,又不至于频繁重绘 */
 const TICK_MS: number = 250;
 /** 答对后自动翻页的停顿。留一眼看清绿色反馈,又不至于等得难受 */
@@ -58,6 +68,11 @@ enum Stage {
   Landing = 0,
   Card = 1,
   Done = 2
+}
+
+/** 把一段时长夹在 [0, cap] 之间。系统时间被往回调时差值会是负的,一并挡掉 */
+function clampMs(ms: number, cap: number): number {
+  return ms < 0 ? 0 : ms > cap ? cap : ms;
 }
 
 @Component
@@ -106,8 +121,21 @@ export struct StudyPage {
   @State private lastLine: string = '';
   @State private remaining: number = 0;
   @State private answered: number = 0;
-  /** 当前卡出现的时刻。作答耗时 = now - shownAt */
+  /** 当前卡出现的时刻,答题时长从这里算起 */
   private shownAt: number = 0;
+  /** 揭示答案的时刻(判完 / 超时 / 不知道 / 显示答案),看解析从这里算起。0 = 还在答题 */
+  private revealedAt: number = 0;
+  /**
+   * 这张卡的**答题时长**,揭示答案时定下,已封顶。表头的「平均用时」就是选择题这个值的平均。
+   * 它只在作答时临时显示,不存;存进 cost_ms 的是**学习时长**(studyMsNow)
+   */
+  private answerTimeMs: number = 0;
+  /**
+   * 选择题判完当场落库,那时还不知道要看多久解析。记下那条作答,
+   * 离开这张卡时 finishCard 把看解析的时间补进它的 cost_ms。ts = 0 表示没有要补的
+   */
+  private pendingLogCard: number = 0;
+  private pendingLogTs: number = 0;
   /** 已过去的毫秒,由计时器驱动 —— 要显示,所以必须是 @State */
   @State private elapsedMs: number = 0;
   /** 选择题已选的字母。多答案卡可以多选 */
@@ -172,6 +200,7 @@ export struct StudyPage {
     }
     this.stopTimer();
     this.cancelAutoNext();
+    this.finishCard();
     this.refresh();
     this.stage = Stage.Landing;
     this.aheadNote = '';
@@ -287,6 +316,8 @@ export struct StudyPage {
   private startTimer(): void {
     this.stopTimer();
     this.shownAt = Date.now();
+    this.revealedAt = 0;
+    this.answerTimeMs = 0;
     this.elapsedMs = 0;
     this.timer = setInterval(() => {
       this.elapsedMs = Date.now() - this.shownAt;
@@ -308,6 +339,8 @@ export struct StudyPage {
   aboutToDisappear(): void {
     this.stopTimer();
     this.cancelAutoNext();
+    // 先补上最后一张卡看解析的时间再同步,不然这一段要等下一次作答才传得上去
+    this.finishCard();
     // 离开这个卡组:让牌组列表等页面按新进度重算
     appStore().bump();
     // 学完一轮:把这一轮的进度传上去(不等结果,失败下次再来)
@@ -319,11 +352,58 @@ export struct StudyPage {
   /** 超时:揭示答案,按「忘了」记一次 */
   private onTimeout(): void {
     this.stopTimer();
+    const ms: number = this.markRevealed();
     this.judged = 3;
     this.revealed = true;
     this.lastLine = L(this.lang).timeUp;
-    this.noteChoiceResult(false, T_MAX_MS);
+    this.noteChoiceResult(false, ms);
     this.commit(Grade.Again);
+  }
+
+  /**
+   * 揭示答案:答题段到此结束,开始计看解析。返回封顶后的答题时长。
+   *
+   * 选择题按 T_MAX 封顶:到点就判超时,正常超不过它。超过只可能是计时器在后台停了 ——
+   * 切后台、锁屏回来,第一跳才判超时,中间那几个小时不是在答题。
+   * 问答 / 挖空没有超时,正面最多计 5 分钟。
+   */
+  private markRevealed(): number {
+    const now: number = Date.now();
+    const cap: number = this.cardType === (NoteType.Choice as number) ? T_MAX_MS : SEGMENT_CAP_MS;
+    this.answerTimeMs = this.shownAt > 0 ? clampMs(now - this.shownAt, cap) : 0;
+    this.revealedAt = now;
+    return this.answerTimeMs;
+  }
+
+  /** 这张卡到此刻为止的学习时长 = 答题时长 + 看解析的时长(最多 5 分钟) */
+  private studyMsNow(): number {
+    const explain: number = this.revealedAt > 0
+      ? clampMs(Date.now() - this.revealedAt, SEGMENT_CAP_MS) : 0;
+    return this.answerTimeMs + explain;
+  }
+
+  /**
+   * 离开当前这张卡:下一张、返回概览、离开本页都先走这里。
+   *
+   * 选择题判完就落库了,这里把看解析的时间补进那条作答的 cost_ms。问答 / 挖空
+   * 是点评级时落库的,那时解析已经看完,不需要补。补一次就清掉,重复调用无害。
+   *
+   * 已知的小误差:看解析时切走再回来,回到前台的那次同步会先把没补的值传上去;
+   * 再补的这一段要等当天下一次作答,其他设备才看得到(最多差 5 分钟)。本机统计不受影响。
+   */
+  private finishCard(): void {
+    if (this.pendingLogTs === 0) {
+      return;
+    }
+    const card: number = this.pendingLogCard;
+    const ts: number = this.pendingLogTs;
+    this.pendingLogTs = 0;
+    try {
+      appStore().getDb().setReviewCost(card, ts, this.studyMsNow());
+    } catch (e) {
+      // 补不上就留着答题时长:只是少记一段解析,不影响排期
+      hilog.error(DOMAIN, TAG, '补记看解析的时间失败 %{public}s', String(e));
+    }
   }
 
   /**
@@ -444,7 +524,7 @@ export struct StudyPage {
       return;
     }
     this.stopTimer();
-    const ms: number = Date.now() - this.shownAt;
+    const ms: number = this.markRevealed();
     const want: string = this.cardAnswer.trim().toUpperCase().split('').sort().join('');
     const got: string = this.picked.join('').toUpperCase().split('').sort().join('');
     const correct: boolean = want.length > 0 && want === got;
@@ -488,7 +568,7 @@ export struct StudyPage {
       return;
     }
     this.stopTimer();
-    const ms: number = Date.now() - this.shownAt;
+    const ms: number = this.markRevealed();
     this.judged = 2;
     this.revealed = true;
     this.noteChoiceResult(false, ms);
@@ -511,6 +591,8 @@ export struct StudyPage {
   private nextCard(): void {
     // 手动点了「下一个」就作废还没触发的自动翻页,否则它可能把新卡也翻掉
     this.cancelAutoNext();
+    // 必须在换卡之前:要用上一张卡的揭示时刻算它看了多久解析
+    this.finishCard();
     this.revealed = false;
     if (this.queue.length === 0) {
       this.refresh();
@@ -572,8 +654,13 @@ export struct StudyPage {
         id: 0, cardId: this.cardId, ts: now, grade: grade as number,
         stabilityBefore: r.stabilityBefore, elapsedDays: r.elapsedDays,
         retrievability: r.retrievability, intervalDays: r.intervalDays,
-          costMs: this.shownAt > 0 ? Date.now() - this.shownAt : 0, algo: st.algo,
+          costMs: this.studyMsNow(), algo: st.algo,
       });
+      // 选择题这时才刚揭示答案,解析还没看;离开这张卡时 finishCard 再把那段补进来
+      if (this.cardType === (NoteType.Choice as number)) {
+        this.pendingLogCard = this.cardId;
+        this.pendingLogTs = now;
+      }
 
       this.answered++;
       if (this.judged !== 3) {
@@ -977,6 +1064,7 @@ export struct StudyPage {
         Button(L(this.lang).showAnswer)
           .width('90%').constraintSize({ maxWidth: MAX_READ }).height(48).fontSize(16).margin({ bottom: 14 })
           .onClick(() => {
+            this.markRevealed();
             this.revealed = true;
             if (this.cardType === (NoteType.Cloze as number)) {
               this.clozeFront = renderCloze(this.cardStem, true);

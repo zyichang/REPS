@@ -80,7 +80,10 @@ export interface ReviewLog {
   retrievability: number;
   /** 本次推迟的天数 */
   intervalDays: number;
-  /** 本次答题耗时(毫秒) */
+  /**
+   * 本次作答的**学习时长**(毫秒)= 答题时长 + 看解析的时长,每段有上限(见 StudyPage 的 SEGMENT_CAP_MS)。
+   * 统计页的学习时长就是它按天的和。答题时长本身不存
+   */
   costMs: number;
   /**
    * 当时生效的排期引擎,取值 'fsrs' | 'ebbinghaus'(即 Srs.ets 的 Algo 类型)。

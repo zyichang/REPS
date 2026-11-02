@@ -430,8 +430,8 @@ export struct StatsPage {
   @Builder
   timeCard() {
     // ---- 最近 7 天学习时长 ----
-    // 用的是 review_log.cost_ms,也就是做计时判档时记下的真实答题耗时,
-    // 不是「打开应用多久」——后者会把发呆也算成学习。
+    // 用的是 review_log.cost_ms:每次作答的答题时长 + 看解析的时长,每段最多计 5 分钟
+    // (见 StudyPage 的 SEGMENT_CAP_MS)。不是「打开应用多久」——后者会把发呆也算成学习。
     Column({ space: 8 }) {
       Text(L(this.lang).studyTime).fontSize(14)
         .fontWeight(FontWeight.Medium).width('100%')
