@@ -59,6 +59,7 @@ const FILES = [
   // 桌面测试跑的就是生产那份 SQL,不存在手抄副本走样的问题。
   [join(ets, 'data', 'Schema.ets'), join(here, 'Schema.ts'), [
     ["'../model/Models'", "'./Models'"],
+    ["'../model/Timing'", "'./Timing'"],
     ["'../srs/Srs'", "'./srs'"],
   ]],
   // Quizify 解析器。同样是纯逻辑,畸形输入的报错行为全靠桌面测试盯住。

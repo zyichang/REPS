@@ -7,10 +7,12 @@
  * 第 3~4 节同时是「搬家前后行为一致」的证据:上限 60 秒时,判档线必须正好是原来的 10 秒 / 30 秒。
  */
 import {
-  KINDS, MAX_LIMIT_MINUTES, SEGMENT_CAP_MS, SHORT_LIMIT_MS, answerSegmentMs, choiceGrade, clampMs, countdownRed,
-  countdownText, defaultLimitMs, easyLineMs, explainSegmentMs, goodLineMs, isKind, kindOf, limitFor,
+  HOLD_KINDS, KINDS, MAX_LIMIT_MINUTES, SEGMENT_CAP_MS, SHORT_LIMIT_MS, answerSegmentMs, choiceGrade, clampMs,
+  countdownRed, countdownText, defaultLimitMs, dueAfterGrade, easyLineMs, explainSegmentMs, goodLineMs,
+  holdsUntilTomorrow, isKind, kindOf, limitFor,
 } from './Timing';
 import { Grade, NoteType } from './Models';
+import { Algo, newCardState, schedule, setAlgorithm } from './srs';
 
 let pass = 0;
 let fail = 0;
@@ -149,6 +151,38 @@ check('**2.5 分钟的选择题:75 秒答对是良好,76 秒是困难**',
 check('**倒计时 75 秒变红,74 秒还不红**', countdownRed(CHOICE, 75 * S, L25) && !countdownRed(CHOICE, 74 * S, L25));
 check('2.5 分钟的倒计时从 2:30 开始', countdownText(L25, '秒') === '2:30');
 check('上限常量是 180 分钟', MAX_LIMIT_MINUTES === 180);
+
+console.log('\n=== 11. 大题和写作题记了「忘了」之后当天不再出现 ===');
+
+const H = 3600 * S;
+const T0 = 1793600000000;           // 某天 10:00 前后
+const TOMORROW = T0 + 17 * H;       // 次日凌晨 3 点的日界(由调用方按 dayStart 算,这里直接给)
+check('写作题 + 忘了 → 今天不再出现', holdsUntilTomorrow('essay', Grade.Again));
+check('大题 + 忘了 → 今天不再出现', holdsUntilTomorrow('long', Grade.Again));
+check('写作题 + 困难 / 良好 / 简单 → 不受影响',
+  !holdsUntilTomorrow('essay', Grade.Hard) && !holdsUntilTomorrow('essay', Grade.Good) &&
+  !holdsUntilTomorrow('essay', Grade.Easy));
+check('选择题、填空题、简答题 + 忘了 → 照常当天再出现',
+  !holdsUntilTomorrow('choice', Grade.Again) && !holdsUntilTomorrow('blank', Grade.Again) &&
+  !holdsUntilTomorrow('short', Grade.Again));
+check('题型表是 long / essay', HOLD_KINDS.join(',') === 'long,essay');
+check('10 分钟后到期 → 推到明天的日界', dueAfterGrade('essay', Grade.Again, T0 + 10 * 60 * S, TOMORROW) === TOMORROW);
+check('本来就排到明天以后的,不往前拉', dueAfterGrade('essay', Grade.Again, TOMORROW + 5 * H, TOMORROW) === TOMORROW + 5 * H);
+check('简答题忘了:到期时间原样', dueAfterGrade('short', Grade.Again, T0 + 60 * S, TOMORROW) === T0 + 60 * S);
+
+// 两套引擎:先由引擎排期,再经过 dueAfterGrade;只改到期时间
+for (const algo of ['fsrs', 'ebbinghaus'] as Algo[]) {
+  setAlgorithm(algo);
+  const fresh = newCardState(1, T0);
+  const r = schedule(fresh, Grade.Again, T0, false);
+  const due2 = dueAfterGrade('essay', Grade.Again, r.state.due, TOMORROW);
+  check(`${algo}:新写作题忘了,引擎排在今天(${((r.state.due - T0) / 60000).toFixed(0)} 分钟后)`, r.state.due < TOMORROW);
+  check(`${algo}:**调整后不早于次日 3 点**`, due2 === TOMORROW);
+  const rShort = schedule(fresh, Grade.Again, T0, false);
+  check(`${algo}:简答题忘了不调整,仍在今天`,
+    dueAfterGrade('short', Grade.Again, rShort.state.due, TOMORROW) === rShort.state.due && rShort.state.due < TOMORROW);
+}
+setAlgorithm('fsrs');
 
 console.log(`\n===== 结果: ${pass} 通过 / ${fail} 失败 =====`);
 if (fail > 0) {

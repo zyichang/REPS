@@ -609,10 +609,12 @@ export class Database {
     if (limit <= 0 || to <= from) {
       return [];
     }
+    // 今天的日界:今天记了「忘了」的大题 / 写作题不提前拿(SQL_AHEAD_CARDS 的注释)
+    const today: number = dayStart(dayIndex(from));
     const sql: string = deckId > 0 ? SQL_AHEAD_CARDS_IN_DECK : SQL_AHEAD_CARDS;
     const args: Array<relationalStore.ValueType> = deckId > 0
-      ? [deckId, from, to, limit] as Array<relationalStore.ValueType>
-      : [from, to, limit] as Array<relationalStore.ValueType>;
+      ? [deckId, from, to, today, limit] as Array<relationalStore.ValueType>
+      : [from, to, today, limit] as Array<relationalStore.ValueType>;
     const rs = this.db().querySqlSync(sql, args);
     const out: number[] = [];
     try {

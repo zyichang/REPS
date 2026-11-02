@@ -12,6 +12,7 @@
  */
 
 import { CardState, LearnPhase, TimeLimit } from '../model/Models';
+import { HOLD_KINDS } from '../model/Timing';
 import { DAY_MS, MIN_MS } from '../srs/Srs';
 
 // ---------------------------------------------------------------- 日界
@@ -716,10 +717,20 @@ export const SQL_TODAY_PROGRESS: string =
  * `due > ?`(不是 >=)—— 已经到期的卡本来就在今日集合里,由正常流程出;
  * 这里只负责把未来的卡提前拿上来,两边不重叠。
  * 按 due 升序:最快该复习的先来,这样提前复习的收益最大、打扰最小。
+ *
+ * **今天记了「忘了」的大题和写作题不拿**(CONTEXT.md「题型」):它们刚被推到明天,
+ * 提前拿回来就等于今天又重写一遍。题型表来自 Timing.HOLD_KINDS,和学习页同一个口径。
+ * 参数:(from, to, 今天的日界, limit);按组那条前面多一个 deckId。
  */
+const AHEAD_NOT_HELD: string =
+  `NOT (n.kind IN (${HOLD_KINDS.map((k: string) => `'${k}'`).join(', ')}) AND EXISTS (
+          SELECT 1 FROM review_log r WHERE r.card_id = s.card_id AND r.ts >= ? AND r.grade = 0))`;
+
 export const SQL_AHEAD_CARDS: string =
   `SELECT s.card_id FROM scheduling s
-    WHERE s.due > ? AND s.due < ?
+     JOIN cards c ON c.id = s.card_id
+     JOIN notes n ON n.id = c.note_id
+    WHERE s.due > ? AND s.due < ? AND ${AHEAD_NOT_HELD}
     ORDER BY s.due ASC LIMIT ?`;
 
 export const SQL_AHEAD_CARDS_IN_DECK: string =
@@ -727,7 +738,7 @@ export const SQL_AHEAD_CARDS_IN_DECK: string =
      FROM cards c
      JOIN notes n ON n.id = c.note_id
      JOIN scheduling s ON s.card_id = c.id
-    WHERE n.deck_id = ? AND s.due > ? AND s.due < ?
+    WHERE n.deck_id = ? AND s.due > ? AND s.due < ? AND ${AHEAD_NOT_HELD}
     ORDER BY s.due ASC LIMIT ?`;
 
 export const SQL_DUE_CARDS_IN_DECK: string =

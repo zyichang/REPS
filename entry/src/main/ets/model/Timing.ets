@@ -95,6 +95,30 @@ export function defaultLimitMs(kind: Kind): number {
 export const MAX_LIMIT_MINUTES: number = 180;
 
 /**
+ * 记了「忘了」以后**当天不再出现**的题型:大题和写作题(CONTEXT.md「题型」)。
+ * 刚看完答案、范文就马上重写一遍,考的是短期记忆,不是回忆;明天再来。其他题型照常在当天再出现。
+ * 「学习更多」的取卡语句也用这张表(Schema.SQL_AHEAD_CARDS),两处口径一致。
+ */
+export const HOLD_KINDS: Kind[] = ['long', 'essay'];
+
+/** 这次评级之后,这张卡今天还出不出现:大题 / 写作题记了「忘了」就不出现(超时和自己评一样) */
+export function holdsUntilTomorrow(kind: Kind, grade: Grade): boolean {
+  return grade === Grade.Again && HOLD_KINDS.includes(kind);
+}
+
+/**
+ * 评级后的到期时间。大题 / 写作题记了「忘了」:不早于明天的日界 tomorrowStart(次日凌晨 3 点);
+ * 其他情况原样返回排期引擎给的到期时间。只动到期时间,稳定性等别的排期结果不动 ——
+ * 所以 FSRS 和固定阶梯两套引擎都一样:先由引擎排期,再经过这里。
+ */
+export function dueAfterGrade(kind: Kind, grade: Grade, due: number, tomorrowStart: number): number {
+  if (holdsUntilTomorrow(kind, grade) && due < tomorrowStart) {
+    return tomorrowStart;
+  }
+  return due;
+}
+
+/**
  * 这张卡的答题时间上限(毫秒):牌组 `time_limits` 里写了这个题型就用它,没写就用默认值。
  * 覆盖值导入时已经校验过;万一库里有坏值(不是正数),也按没写处理。
  */

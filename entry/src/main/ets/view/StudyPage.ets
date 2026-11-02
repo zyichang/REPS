@@ -18,9 +18,10 @@ import {
   SK_IMMERSIVE, SK_LANG, SK_TICK, appStore,
 } from '../store/AppStore';
 import { L, LANG_ZH, fmt, gradeLabels, phaseLabels } from '../i18n/Strings';
-import { formatInterval, newCardState, schedule } from '../srs/Srs';
+import { DAY_MS, formatInterval, newCardState, schedule } from '../srs/Srs';
 import {
-  SHORT_LIMIT_MS, answerSegmentMs, choiceGrade, countdownRed, countdownText, explainSegmentMs, kindOf, limitFor,
+  Kind, SHORT_LIMIT_MS, answerSegmentMs, choiceGrade, countdownRed, countdownText, dueAfterGrade, explainSegmentMs,
+  holdsUntilTomorrow, kindOf, limitFor,
 } from '../model/Timing';
 import { MAX_READ } from './Layout';
 import { syncNow } from '../data/SyncService';
@@ -121,6 +122,8 @@ export struct StudyPage {
    * 这张卡答题段的上限,换卡时按题型取(Timing)。到点就超时;倒计时和变红都读它,所以是 @State
    */
   @State private limitMs: number = SHORT_LIMIT_MS;
+  /** 这张卡的有效题型(Timing.kindOf)。上限和「忘了之后今天还出不出现」都看它 */
+  private cardKind: Kind = 'short';
   /** 选择题已选的字母。多答案卡可以多选 */
   @State private picked: string[] = [];
   /** 0 未判 / 1 对 / 2 错 / 3 超时 */
@@ -568,7 +571,8 @@ export struct StudyPage {
     this.cardAnswer = row.answer;
     this.cardType = row.type;
     // 必须在 startTimer 之前:计时器和倒计时都按这张卡的上限算(牌组 time_limits 优先,没写用默认值)
-    this.limitMs = limitFor(kindOf(row.type, row.kind), parseTimeLimitsColumn(row.deck_time_limits));
+    this.cardKind = kindOf(row.type, row.kind);
+    this.limitMs = limitFor(this.cardKind, parseTimeLimitsColumn(row.deck_time_limits));
     const st0: CardState | null = appStore().getDb().loadState(id);
     this.curInLearning = st0 === null
       || st0.phase === LearnPhase.New || st0.phase === LearnPhase.Learning;
@@ -604,6 +608,13 @@ export struct StudyPage {
       const prev: CardState | null = db.loadState(this.cardId);
       const base: CardState = prev !== null ? prev : newCardState(this.cardId, now);
       const r = schedule(base, grade, now, true);
+      // 大题 / 写作题记了「忘了」:推到明天,今天不再出现(CONTEXT.md「题型」)。
+      // 两套引擎都是先排期、再在这里调整,只改到期时间;下面落库、记流水、显示「下次」都用调整后的
+      const held: boolean = holdsUntilTomorrow(this.cardKind, grade);
+      if (held) {
+        r.state.due = dueAfterGrade(this.cardKind, grade, r.state.due, dayStart(dayIndex(now) + 1));
+        r.intervalDays = (r.state.due - now) / DAY_MS;
+      }
 
       db.saveState(r.state);
       db.logReview({
@@ -627,8 +638,8 @@ export struct StudyPage {
       // 表头的三段条要跟着动,否则做完一张看不出变化
       this.refresh();
 
-      // 还在分钟级步进的卡,今天还会再来一次
-      if (r.intervalDays < 1) {
+      // 还在分钟级步进的卡,今天还会再来一次。推到明天的大题 / 写作题不再排进本轮
+      if (r.intervalDays < 1 && !held) {
         this.requeue(this.cardId, r.intervalDays);
       }
     } catch (e) {

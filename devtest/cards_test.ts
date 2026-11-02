@@ -10,7 +10,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { NoteType } from './Models';
 import { QuizifyError, parseOneCard } from './Quizify';
 import {
-  DDL, SQL_AHEAD_CARDS, SQL_AHEAD_CARDS_IN_DECK, SQL_NEW_INTRODUCED_TODAY,
+  DDL, MIGRATIONS, SQL_AHEAD_CARDS, SQL_AHEAD_CARDS_IN_DECK, SQL_NEW_INTRODUCED_TODAY,
   SQL_COUNT_CARDS_IN_DECK,
   SQL_TODAY_PROGRESS, SQL_UNLEARNED_COUNT, SQL_UNTOUCHED_DUE, SQL_DELETE_NOTE, SQL_DELETE_NOTE_CARDS,
   SQL_DELETE_NOTE_SCHED, SQL_LIST_CARDS_ALL, SQL_LIST_CARDS_IN_DECK,
@@ -156,12 +156,18 @@ const db2 = new DatabaseSync(':memory:');
 for (const stmt of DDL) {
   db2.exec(stmt);
 }
+// 「学习更多」要看 notes.kind(v4),所以这一节的库要跑完迁移
+for (const mg of MIGRATIONS) {
+  for (const stmt of mg.statements) {
+    db2.exec(stmt);
+  }
+}
 db2.exec(`INSERT INTO decks (id, name) VALUES (1, 'A'), (2, 'B')`);
-function seed(noteId: number, cardId: number, deck: number, due: number): void {
+function seed(noteId: number, cardId: number, deck: number, due: number, kind: string = ''): void {
   db2.exec(`INSERT INTO notes (id, deck_id, type, front, back, title, options, answer,
-            source_file, fingerprint, uuid, updated_at)
+            source_file, fingerprint, uuid, updated_at, kind)
             VALUES (${noteId}, ${deck}, 0, 'f${noteId}', 'b${noteId}', 't${noteId}', '', '',
-                    'x.md', 'fp-${noteId}', 'n${noteId}', 0)`);
+                    'x.md', 'fp-${noteId}', 'n${noteId}', 0, '${kind}')`);
   db2.exec(`INSERT INTO cards (id, note_id, ordinal, uuid, updated_at)
             VALUES (${cardId}, ${noteId}, 0, 'c${cardId}', 0)`);
   db2.exec(`INSERT INTO scheduling (card_id, stability, difficulty, reps, lapses, streak,
@@ -170,6 +176,8 @@ function seed(noteId: number, cardId: number, deck: number, due: number): void {
 }
 const NOW = 1000000;
 const WIN = NOW + 2 * 86400000;
+/** 今天的日界:在它之后的作答算「今天」 */
+const AHEAD_TODAY = NOW - 3600000;
 seed(1, 1, 1, NOW - 5000);        // 已经到期 —— 不该出现在「学习更多」里
 seed(2, 2, 1, NOW);              // 正好等于 now —— 边界,也算已到期
 seed(3, 3, 1, NOW + 60000);      // 一分钟后到期 —— 应该拿到
@@ -177,7 +185,7 @@ seed(4, 4, 1, WIN - 1);          // 窗口内最后一刻 —— 应该拿到
 seed(5, 5, 1, WIN + 1);          // 窗口外 —— 不该拿到
 seed(6, 6, 2, NOW + 30000);      // 另一个卡组 —— 按组过滤时不该拿到
 
-const ahead = (db2.prepare(SQL_AHEAD_CARDS_IN_DECK).all(1, NOW, WIN, 10) as Row[])
+const ahead = (db2.prepare(SQL_AHEAD_CARDS_IN_DECK).all(1, NOW, WIN, AHEAD_TODAY, 10) as Row[])
   .map((r) => r.card_id);
 check('已到期的卡不在「学习更多」里(due > now,不是 >=)',
   !ahead.includes(1) && !ahead.includes(2), ahead.join(','));
@@ -186,13 +194,38 @@ check('窗口外的卡拿不到', !ahead.includes(5), ahead.join(','));
 check('别的卡组的卡拿不到(按组过滤)', !ahead.includes(6), ahead.join(','));
 check('按 due 升序:最快到期的在前', ahead[0] === 3, ahead.join(','));
 
-const capped = (db2.prepare(SQL_AHEAD_CARDS_IN_DECK).all(1, NOW, WIN, 1) as Row[]);
+const capped = (db2.prepare(SQL_AHEAD_CARDS_IN_DECK).all(1, NOW, WIN, AHEAD_TODAY, 1) as Row[]);
 check('LIMIT 生效(设置里的每次张数就是它)', capped.length === 1, `${capped.length}`);
 
-const allDecks = (db2.prepare(SQL_AHEAD_CARDS).all(NOW, WIN, 10) as Row[])
+const allDecks = (db2.prepare(SQL_AHEAD_CARDS).all(NOW, WIN, AHEAD_TODAY, 10) as Row[])
   .map((r) => r.card_id);
 check('全部卡组时能跨组拿(含卡组 B 的那张)',
   allDecks.includes(6) && allDecks.includes(3), allDecks.join(','));
+
+// 今天记了「忘了」的大题 / 写作题被推到了明天:「学习更多」不能把它们提前拿回来
+function logAt(cardId: number, ts: number, grade: number): void {
+  db2.exec(`INSERT INTO review_log (card_id, ts, grade) VALUES (${cardId}, ${ts}, ${grade})`);
+}
+seed(7, 7, 1, NOW + 7200000, 'essay');   // 今天忘了 → 不拿
+logAt(7, NOW - 60000, 0);
+seed(8, 8, 1, NOW + 7300000, 'long');    // 今天忘了 → 不拿
+logAt(8, NOW - 50000, 0);
+seed(9, 9, 1, NOW + 7400000, 'essay');   // 今天答的是「良好」→ 照常拿
+logAt(9, NOW - 40000, 2);
+seed(10, 10, 1, NOW + 7500000, 'short'); // 简答题今天忘了 → 规则只管大题和写作题,照常拿
+logAt(10, NOW - 30000, 0);
+seed(11, 11, 1, NOW + 7600000, 'long');  // 昨天忘的 → 不是今天,照常拿
+logAt(11, AHEAD_TODAY - 1000, 0);
+const ahead2 = (db2.prepare(SQL_AHEAD_CARDS_IN_DECK).all(1, NOW, WIN, AHEAD_TODAY, 20) as Row[])
+  .map((r) => r.card_id);
+check('**今天记了忘了的写作题、大题不在「学习更多」里**', !ahead2.includes(7) && !ahead2.includes(8),
+  ahead2.join(','));
+check('今天答对的写作题照常拿', ahead2.includes(9), ahead2.join(','));
+check('简答题今天忘了也照常拿(只管大题和写作题)', ahead2.includes(10), ahead2.join(','));
+check('昨天忘的大题照常拿', ahead2.includes(11), ahead2.join(','));
+const allDecks2 = (db2.prepare(SQL_AHEAD_CARDS).all(NOW, WIN, AHEAD_TODAY, 20) as Row[]).map((r) => r.card_id);
+check('全部卡组那条语句同样跳过', !allDecks2.includes(7) && !allDecks2.includes(8) && allDecks2.includes(9),
+  allDecks2.join(','));
 // ================================================================ 4. 今日进度三段条
 console.log('\n=== 4. 三段条按「下次到期」分段,不按成绩 ===');
 
