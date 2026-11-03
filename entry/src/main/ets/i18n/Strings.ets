@@ -30,6 +30,7 @@ export interface Dict {
   checkInConfirmBody: string;    // %d 待学习 %d 待复习
   checkInAnyway: string;
   checkInDone: string;
+  checkInAuto: string;
   checkinCalendar: string;
   monthTitle: string;            // %d 年 %d 月
   deckListEmpty: string;
@@ -290,7 +291,7 @@ const ZH: Dict = {
   todayTitle: '今日', notCheckedIn: '尚未打卡', checkedIn: '已打卡',
   checkInConfirmTitle: '还有未完成的学习任务',
   checkInConfirmBody: '今天还有 %d 张待学习、%d 张待复习。仍要打卡吗?打卡后不能撤销。',
-  checkInAnyway: '仍要打卡', checkInDone: '今天已打卡',
+  checkInAnyway: '仍要打卡', checkInDone: '今天已打卡', checkInAuto: '今天的卡都学完了,已自动打卡',
   checkinCalendar: '打卡统计', monthTitle: '%d 年 %d 月',
   deckListEmpty: '还没有牌组 —— 导入一个 YAML(或 Markdown)卡组文件就能开始',
   colNew: '新', colLearn: '学习中', colDue: '待复习',
@@ -466,6 +467,7 @@ const EN: Dict = {
   checkInConfirmTitle: 'You still have unfinished tasks',
   checkInConfirmBody: '%d to learn and %d to review are left today. Check in anyway? A check-in cannot be undone.',
   checkInAnyway: 'Check in anyway', checkInDone: 'Checked in for today',
+  checkInAuto: "All of today's cards are done. Checked in automatically.",
   checkinCalendar: 'Check-ins', monthTitle: '%d-%d',
   deckListEmpty: 'No decks yet — import a YAML (or Markdown) deck file to start',
   colNew: 'New', colLearn: 'Learn', colDue: 'Due',

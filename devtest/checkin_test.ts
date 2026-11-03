@@ -3,9 +3,9 @@
  */
 import { DatabaseSync } from 'node:sqlite';
 import {
-  DDL, META_BACKFILL_CHECKINS, MIGRATE_BACKFILL_CHECKINS, SQL_CHECKIN_DAYS, SQL_INSERT_CHECKIN,
-  SQL_IS_CHECKED_IN, SQL_META_GET, SQL_META_SET, calendarCells, calendarDate, checkinStreak,
-  dayAnchor, dayIndex, weekdaySun0,
+  DDL, DeckCounts, META_BACKFILL_CHECKINS, MIGRATE_BACKFILL_CHECKINS, SQL_ANSWERED_SINCE, SQL_CHECKIN_DAYS,
+  SQL_DECK_COUNTS, SQL_INSERT_CHECKIN, SQL_IS_CHECKED_IN, SQL_META_GET, SQL_META_SET, applyDeckLimits,
+  calendarCells, calendarDate, checkinStreak, dayAnchor, dayIndex, dayStart, todayAllDone, weekdaySun0,
 } from './Schema';
 
 let pass = 0;
@@ -90,6 +90,63 @@ check('2026 年 10 月以 10/31 结尾(10/31 是周六,不需要补下个月)', 
 const nov = calendarCells(2026, 10).map((d) => calendarDate(d)[2]);
 check('2026 年 11 月以 11/1 开头(周日)、以 12/5 结尾', nov[0] === 1 && nov[nov.length - 1] === 5,
   `${nov[0]} … ${nov[nov.length - 1]}`);
+
+console.log('\n=== 5. 今天的卡都学完了就自动打卡(todayAllDone,.scratch/auto-check-in) ===');
+const zero: DeckCounts = { id: 1, name: 'A', cards: 3, newCount: 0, learnCount: 0, dueCount: 0, settled: 3 };
+check('今天一张都没答:不算学完(没有牌组)', !todayAllDone([], 0));
+check('今天一张都没答:不算学完(各组都是 0,比如今天根本没有卡)', !todayAllDone([zero], 0));
+check('各组都是 0、今天答过:学完', todayAllDone([zero, { ...zero, id: 2 }], 5));
+check('还有新卡:没学完', !todayAllDone([zero, { ...zero, id: 2, newCount: 1 }], 5));
+check('还有卡在学习步里(学习中):没学完', !todayAllDone([{ ...zero, learnCount: 1 }], 5));
+check('还有待复习:没学完', !todayAllDone([{ ...zero, dueCount: 1 }], 5));
+
+// 用生产的牌组计数 SQL 走一遍真实的一天:两个牌组,4 张新卡 + 1 张今天下午到期的旧卡
+const db5 = new DatabaseSync(':memory:');
+for (const s of DDL) { db5.exec(s); }
+db5.exec(`INSERT INTO decks (id, name) VALUES (1, 'A'), (2, 'B')`);
+for (let id = 1; id <= 5; id++) {
+  db5.exec(`INSERT INTO notes (id, deck_id, type, front, back, title, options, answer, source_file, fingerprint, uuid, updated_at)
+            VALUES (${id}, ${id <= 2 ? 1 : 2}, 0, 'f', 'b', 't${id}', '', '', 'x', 'fp${id}', 'n${id}', 0)`);
+  db5.exec(`INSERT INTO cards (id, note_id, ordinal, uuid, updated_at) VALUES (${id}, ${id}, 0, 'c${id}', 0)`);
+}
+const N5 = new Date(2026, 9, 20, 12, 0).getTime();   // 中午,远离凌晨 3 点的日界
+const from5 = dayStart(dayIndex(N5));
+const to5 = dayStart(dayIndex(N5) + 1);
+const MIN5 = 60 * 1000;
+const DAY5 = 24 * 60 * MIN5;
+function decks5(): DeckCounts[] {
+  const rows = db5.prepare(SQL_DECK_COUNTS).all(to5, from5, from5, from5, to5, from5, to5) as Array<Record<string, number>>;
+  return rows.map((r) => applyDeckLimits({
+    id: r.id, name: `${r.name}`, cards: r.cards, unlearned: r.unlearned, untouchedDue: r.untouched_due,
+    newToday: r.new_today, again: r.again, settled: r.settled,
+  }, 20, 200));
+}
+const answered5 = (): number => (db5.prepare(SQL_ANSWERED_SINCE).get(from5) as NRow).n;
+/** 答一次:排期写成 due / last,流水记一条 */
+function answer5(card: number, due: number, last: number, firstSeen: number): void {
+  db5.exec(`INSERT OR REPLACE INTO scheduling (card_id, stability, difficulty, reps, lapses, streak,
+            last_review, due, phase, step, first_seen) VALUES
+            (${card}, 1, 5, 1, 0, 1, ${last}, ${due}, 2, 0, ${firstSeen})`);
+  db5.exec(`INSERT INTO review_log (card_id, ts, grade) VALUES (${card}, ${last}, 3)`);
+}
+// 第 5 张:三天前学过,今天下午 5 点到期 —— 属于今天这一组
+answer5(5, to5 - 10 * 60 * MIN5, N5 - 3 * DAY5, N5 - 10 * DAY5);
+check('早上:4 张新卡 + 1 张今天到期,没学完', !todayAllDone(decks5(), answered5()), JSON.stringify(decks5()));
+answer5(1, to5 + 2 * DAY5, N5 - 30 * MIN5, N5 - 30 * MIN5);
+answer5(2, to5 + DAY5, N5 - 25 * MIN5, N5 - 25 * MIN5);
+answer5(3, to5 + DAY5, N5 - 20 * MIN5, N5 - 20 * MIN5);
+answer5(4, N5 + 10 * MIN5, N5 - 5 * MIN5, N5 - 5 * MIN5);        // 答错了,10 分钟后回来
+check('新卡都答过了,但第 4 张还在学习步里、第 5 张还没复习:没学完', !todayAllDone(decks5(), answered5()));
+answer5(5, to5 + 3 * DAY5, N5 - 2 * MIN5, N5 - 10 * DAY5);
+check('下午到期的那张提前复习了,第 4 张仍在学习步里:没学完', !todayAllDone(decks5(), answered5()));
+answer5(4, to5 + DAY5, N5 + 11 * MIN5, N5 - 5 * MIN5);           // 回来又答一次,明天见
+check('**最后一张也学完了:学完,该自动打卡**', todayAllDone(decks5(), answered5()), JSON.stringify(decks5()));
+check('今天的作答数 = 6(第 4 张答了两次;第 5 张三天前那次不算)', answered5() === 6, `${answered5()}`);
+db5.exec(`INSERT INTO review_log (card_id, ts, grade, archived) VALUES (1, ${N5 + 20 * MIN5}, 3, 1)`);
+check('清空进度归档的流水照算:今天确实学过(ADR-0005)', answered5() === 7, `${answered5()}`);
+db5.exec(`INSERT INTO review_log (card_id, ts, grade) VALUES (1, ${from5 - MIN5}, 3)`);
+check('凌晨 3 点之前的那次算昨天', answered5() === 7, `${answered5()}`);
+db5.close();
 
 console.log(`\n===== 结果: ${pass} 通过 / ${fail} 失败 =====`);
 if (fail > 0) { process.exit(1); }

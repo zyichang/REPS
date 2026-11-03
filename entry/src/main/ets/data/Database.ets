@@ -16,7 +16,7 @@ import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { CardState, NoteType, ReviewLog } from '../model/Models';
 import {
-  BrowseRow, CardBrief, DDL, META_BACKFILL_CHECKINS, MIGRATE_BACKFILL_CHECKINS, SQL_CHECKIN_DAYS,
+  BrowseRow, CardBrief, DDL, META_BACKFILL_CHECKINS, MIGRATE_BACKFILL_CHECKINS, SQL_ANSWERED_SINCE, SQL_CHECKIN_DAYS,
   SQL_INSERT_CHECKIN, SQL_IS_CHECKED_IN, SQL_META_GET, SQL_META_SET, dayAnchor, DayStat, SQL_BROWSE, SQL_BROWSE_COUNT, SQL_BROWSE_ONE, browseArgs, browseCountArgs, DeckCountRow, DeckCounts, DeckRow, LogPoint, SQL_DECK_COUNTS,
   applyDeckLimits, dayIndex, dayStart, MIGRATE_FLATTEN_DECKS, ReviewCardRow,
   ReviewedCard, SQL_AHEAD_CARDS, SQL_AHEAD_CARDS_IN_DECK, SQL_COUNT_CARDS,
@@ -258,6 +258,11 @@ export class Database {
 
   isCheckedIn(day: number): boolean {
     return this.scalar(SQL_IS_CHECKED_IN, [day] as Array<relationalStore.ValueType>) > 0;
+  }
+
+  /** 从 dayFrom(今日起点)起答过几次卡,含已归档的流水。自动打卡用它判断今天学过没有 */
+  answeredSince(dayFrom: number): number {
+    return this.scalar(SQL_ANSWERED_SINCE, [dayFrom] as Array<relationalStore.ValueType>);
   }
 
   /** 全部打卡日(日序号,升序) */

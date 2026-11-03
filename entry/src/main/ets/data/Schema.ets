@@ -173,6 +173,34 @@ export const SQL_IS_CHECKED_IN: string = `SELECT COUNT(*) AS n FROM checkins WHE
 export const SQL_CHECKIN_DAYS: string = `SELECT day FROM checkins ORDER BY day ASC`;
 
 /**
+ * 从某个时刻(今日起点)起答过几次卡。**含已归档的流水**:清空进度不等于今天没学(ADR-0005)。
+ * 列名必须叫 n(见 Database.scalar)。
+ */
+export const SQL_ANSWERED_SINCE: string = `SELECT COUNT(*) AS n FROM review_log WHERE ts >= ?`;
+
+/**
+ * 今天的卡是不是都学完了 —— 学完就自动打卡(.scratch/auto-check-in)。
+ *
+ * 学完 = 每个牌组的新、学习中、待复习都是 0,也就是牌组列表上的那几个数
+ * (新卡已按每日额度截过,待复习已按复习上限截过),**而且今天至少答过一张卡**:
+ * 一张都没答的日子不算学习日,空库、今天根本没有卡,都不自动打卡。
+ * 学习中也要是 0:作答中途退出、还有卡在分钟级的学习步里,今天就还没学完。
+ * 下午才到期的卡算在待复习里,它属于今天这一组,到期并学完之前也不打卡。
+ * 没学完也想打卡,就在「今日」卡片上手动点(会先确认一次)。
+ */
+export function todayAllDone(decks: DeckCounts[], answeredToday: number): boolean {
+  if (answeredToday <= 0) {
+    return false;
+  }
+  for (const d of decks) {
+    if (d.newCount > 0 || d.learnCount > 0 || d.dueCount > 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * 一次性回填:打卡功能上线之前,**有作答的日子一律算打过卡**,
  * 否则老用户的「学习天数」会从 0 重新数。
  * 参数是 dayAnchor(now)(与 SQL_DAY_STATS 同一个日界口径)。由 meta 里的标记保证只跑一次。

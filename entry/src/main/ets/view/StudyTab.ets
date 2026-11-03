@@ -18,7 +18,7 @@
 
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { DeckCounts, dayIndex } from '../data/Schema';
+import { DeckCounts, dayIndex, dayStart, todayAllDone } from '../data/Schema';
 import { L, LANG_ZH, fmt } from '../i18n/Strings';
 import { SK_IMMERSIVE, SK_LANG, SK_TICK, appStore } from '../store/AppStore';
 import { BP_SM, MAX_COL, SIDE_W, SK_BP, isSplit } from './Layout';
@@ -146,6 +146,11 @@ export struct StudyTab {
       this.checkedIn = db.isCheckedIn(dayIndex(now));
       this.ensureDetail(!this.autoOpened);
       this.autoOpened = this.autoOpened || this.decks.length > 0;
+      // 今天的卡都学完了:自动打卡(.scratch/auto-check-in)。学完一轮时学习页会 bump,牌组列表跟着走到这里。
+      // 放在最后:doCheckIn 的 bump 会让这个函数再跑一次,那时已打卡,不会再进来
+      if (!this.checkedIn && todayAllDone(this.decks, db.answeredSince(dayStart(dayIndex(now))))) {
+        this.doCheckIn(true);
+      }
     } catch (e) {
       this.status = fmt(L(this.lang).readFailed, `${e}`);
       hilog.error(DOMAIN, TAG, '读取牌组失败 %{public}s', `${e}`);
@@ -170,7 +175,8 @@ export struct StudyTab {
   // ---------------------------------------------------------------- 打卡
 
   /**
-   * 点打卡。**打卡是用户自己说「今天就到这里」**,统计里的学习天数按它算。
+   * 点打卡。今天的卡都学完时 App 会自己打卡(reload);没学完也想打卡,就是用户自己说「今天就到这里」。
+   * 统计里的学习天数按打卡算。
    * 待学习 + 待复习都是 0:直接打卡;还有剩:先问一句。已打卡:什么都不做(不能撤销)。
    */
   private onCheckIn(): void {
@@ -178,7 +184,7 @@ export struct StudyTab {
       return;
     }
     if (this.totalNew + this.totalDue === 0) {
-      this.doCheckIn();
+      this.doCheckIn(false);
       return;
     }
     this.getUIContext().showAlertDialog({
@@ -186,16 +192,17 @@ export struct StudyTab {
       message: fmt(L(this.lang).checkInConfirmBody, this.totalNew, this.totalDue),
       autoCancel: true,
       primaryButton: { value: L(this.lang).cancel, action: () => {} },
-      secondaryButton: { value: L(this.lang).checkInAnyway, action: () => this.doCheckIn() },
+      secondaryButton: { value: L(this.lang).checkInAnyway, action: () => this.doCheckIn(false) },
     });
   }
 
-  private doCheckIn(): void {
+  /** auto:学完了自动打的卡,提示语不一样 */
+  private doCheckIn(auto: boolean): void {
     try {
       const now: number = Date.now();
       appStore().getDb().checkIn(dayIndex(now), now);
       this.checkedIn = true;
-      this.status = L(this.lang).checkInDone;
+      this.status = auto ? L(this.lang).checkInAuto : L(this.lang).checkInDone;
       appStore().bump();      // 统计页的学习天数 / 月历跟着变
     } catch (e) {
       this.status = fmt(L(this.lang).saveFailed, `${e}`);
