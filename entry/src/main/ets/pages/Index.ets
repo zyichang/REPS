@@ -243,9 +243,10 @@ struct Index {
         .barHeight(isSplit(this.bp) ? '100%' : (this.immersive ? 0 : BAR_H))
         .barBackgroundColor('#FFFFFF')
         .divider(isSplit(this.bp) && !this.immersive ? { strokeWidth: 1, color: '#E5E5EA' } : null)
-        // **藏起标签栏不等于锁住手势。** Tabs 默认可以左右滑动切页,
-        // 作答中一划就跳走,计时和专注都被打断 —— 所以沉浸时把滑动也关掉。
-        .scrollable(!this.immersive)
+        // **只能点标签栏切换,不能滑动切换**(.scratch/tab-swipe)。Tabs 默认可以滑动切页:
+        // 横屏时标签栏竖排,在浏览页标题栏上往上一划就跳到「我的」;作答中一划,计时和专注都被打断。
+        // 页面里面的列表、滚动区照常滚动,不受影响
+        .scrollable(false)
         .animationDuration(0)
         .width('100%')
         .height('100%')
