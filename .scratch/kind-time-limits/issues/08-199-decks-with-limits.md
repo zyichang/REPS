@@ -50,3 +50,10 @@ Status: ready-for-agent
   导入测试写进转换说明;重新生成那节加上 `check.sh`。
 - **没有在 PKB 提交。** `PKB/199/` 从来没进过 git,而 PKB 在 GitHub 上是公开仓库;三副牌组是商业书的内容(`personal-use`),
   提交以后下一次 push 就公开了。先问用户怎么处理。
+
+### 2026-11-03 · PKB 已提交
+
+- 用户先在 GitHub 上把 PKB 改成私有。确认过:GitHub API 返回 `private: true`,不登录访问仓库页面和 API 都是 404。
+- PKB 提交 `d78f953`:整个 `199/`(README、三副牌组、`_tools/` 里的构建脚本和公式转写,共 22 个文件),
+  外加 `.gitignore` 的 `__pycache__/`。没有 push。
+- 这几副牌组是商业书的内容,PKB 要一直保持私有;以后要改回公开,得先把 `199/` 移出仓库。
