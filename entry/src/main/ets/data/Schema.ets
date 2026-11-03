@@ -1199,7 +1199,7 @@ export const SQL_COUNT_NEW: string =
  */
 export const SQL_BROWSE: string =
   `SELECT c.id AS card_id, n.id AS note_id, n.deck_id, d.name AS deck_name,
-          n.type, n.title, n.front, n.back,
+          n.type, n.title, n.front, n.back, n.options, n.answer,
           COALESCE(s.due, 0) AS due, COALESCE(s.reps, 0) AS reps
      FROM cards c
      JOIN notes n ON n.id = c.note_id
@@ -1215,7 +1215,7 @@ export const SQL_BROWSE: string =
 /** 浏览器的一行,按卡片 id 取(编辑保存后刷新预览用)。列与 SQL_BROWSE 相同 */
 export const SQL_BROWSE_ONE: string =
   `SELECT c.id AS card_id, n.id AS note_id, n.deck_id, d.name AS deck_name,
-          n.type, n.title, n.front, n.back,
+          n.type, n.title, n.front, n.back, n.options, n.answer,
           COALESCE(s.due, 0) AS due, COALESCE(s.reps, 0) AS reps
      FROM cards c
      JOIN notes n ON n.id = c.note_id
@@ -1269,6 +1269,10 @@ export interface BrowseRow {
   title: string;
   front: string;
   back: string;
+  /** 选择卡的选项,库里的原样(「A. 内容」,换行分开);别的卡片类型是空串。预览和编辑页用 */
+  options: string;
+  /** 选择卡的答案字母,如 `B`、`AC`;别的卡片类型是空串 */
+  answer: string;
   /** 下次到期毫秒。0 表示从没学过 */
   due: number;
   reps: number;

@@ -118,6 +118,21 @@ check('SQL_BROWSE_ONE 取到同一张卡、同样的列', one !== undefined && o
   && one.front === fromList.front && one.deck_name === 'Words' && one.title === '水果');
 check('SQL_BROWSE_ONE 卡不存在时没有结果', db.prepare(SQL_BROWSE_ONE).get(999) === undefined);
 
+// 选择卡:预览和编辑页要拿到选项和答案(.scratch/editor-choice-card-loss)
+db.prepare(`INSERT INTO notes (id, deck_id, type, front, back, title, options, answer,
+         source_file, fingerprint, uuid, updated_at)
+         VALUES (?, 2, 1, '哪些是线性结构?', '', '', ?, 'AC', 'x.md', 'fp-ch', 'n-ch', 0)`)
+  .run(id, 'A. 栈\nB. 树\nC. 队列');
+db.prepare(`INSERT INTO cards (id, note_id, ordinal, uuid, updated_at) VALUES (?, ?, 0, 'c-ch', 0)`).run(id, id);
+const ch = db.prepare(SQL_BROWSE_ONE).get(id) as unknown as { type: number; options: string; answer: string };
+check('SQL_BROWSE_ONE 带上选择卡的选项和答案', ch.type === 1 && ch.options === 'A. 栈\nB. 树\nC. 队列' && ch.answer === 'AC',
+  JSON.stringify(ch));
+const chList = (db.prepare(SQL_BROWSE).all(...browseArgs(2, '线性', 10, 0)) as unknown as
+  Array<{ options: string; answer: string }>)[0];
+check('SQL_BROWSE 的列表行也带上', chList !== undefined && chList.options === ch.options && chList.answer === 'AC');
+const qaRow = db.prepare(SQL_BROWSE_ONE).get(6) as unknown as { options: string; answer: string };
+check('问答卡的选项和答案是空串', qaRow.options === '' && qaRow.answer === '', JSON.stringify(qaRow));
+
 db.close();
 console.log(`\n===== 结果: ${pass} 通过 / ${fail} 失败 =====`);
 if (fail > 0) {

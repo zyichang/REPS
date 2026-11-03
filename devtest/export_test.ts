@@ -11,8 +11,10 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { SQL_EXPORT_DECK, SQL_EXPORT_NOTES, parseTagsColumn, parseTimeLimitsColumn } from './Schema';
-import { DeckMeta, ParsedCard, ParsedDeck, emptyMeta, parseQuizify } from './Quizify';
+import { SQL_EXPORT_DECK, SQL_EXPORT_NOTES, SQL_UPDATE_NOTE_TEXT, parseTagsColumn, parseTimeLimitsColumn, splitOptions } from './Schema';
+import {
+  DeckMeta, ParsedCard, ParsedDeck, choiceCardOf, emptyMeta, optionBody, parseOneCard, parseQuizify, titleAfterEdit,
+} from './Quizify';
 import { parseYamlDeck } from './Yaml';
 import { ExportCard, ExportDeck, cardIdOf, exportYaml, optionText } from './YamlExport';
 import { freshDb, importParsed } from './importsim';
@@ -292,6 +294,106 @@ if (back8 !== null) {
   check('time_limits 往返一致', JSON.stringify(back8.timeLimits) === JSON.stringify(tlsrc.timeLimits),
     JSON.stringify(back8.timeLimits));
 }
+
+// ---------------------------------------------------------------- 9
+console.log('=== 9. 在 App 里改选择卡和问答卡 → 存回去 → 导出(.scratch/editor-choice-card-loss) ===');
+const editSrcText = ['reps: 2', 'meta:', '  id: 9a1b2c3d-0000-4000-8000-0000000000cc',
+  'deck: "编辑测试"', 'time_limits:', '  choice: 2.5', 'cards:',
+  '  - id: ch-1', '    type: choice', '    kind: choice', '    title: "2015 年第 1 题 · 问题求解"',
+  '    front: "下列哪种排序是稳定的?"', '    options: ["快速排序", "归并排序", "堆排序", "选择排序"]', '    answer: B',
+  '    back: "归并排序合并时保持相等元素的先后。"', '    tags: [真题2015, 数学]', '',
+  '  - id: es-1', '    type: qa', '    kind: essay', '    title: "2015 年第 57 题 · 论说文"',
+  '    front: "论说文:以「坚持」为话题"', '    back: "审题:坚持是手段。"', '    tags: [写作]', ''].join('\n');
+const editSrc: ParsedDeck = parseYamlDeck(editSrcText);
+const db9 = freshDb();
+const r9 = importParsed(db9, editSrc, 100);
+interface NoteRow9 {
+  id: number; type: number; kind: string; title: string; front: string; back: string; options: string;
+  answer: string; tags: string; content_hash: string;
+}
+const note9 = (cid: string): NoteRow9 => db9.prepare(
+  `SELECT id, type, kind, title, front, back, options, answer, tags, content_hash FROM notes WHERE uuid = ?`)
+  .get(`${r9.deckUuid}/${cid}`) as unknown as NoteRow9;
+const before9 = note9('ch-1');
+// 这张卡学过:排期挂在卡片上,编辑不能动它
+const card9 = (db9.prepare(`SELECT id FROM cards WHERE note_id = ?`).get(before9.id) as { id: number }).id;
+db9.exec(`INSERT INTO scheduling (card_id, stability, difficulty, reps, lapses, streak, last_review, due, phase, step,
+          first_seen, updated_at) VALUES (${card9}, 4.2, 5, 3, 0, 3, 150, 9000, 2, 0, 120, 150)`);
+
+// 编辑页打开:库里的选项 → 表单(和 CardEditPage.aboutToAppear 一样)
+const stored9 = splitOptions(before9.options);
+const opts9 = stored9.map((s, i) => optionBody(s, i));
+const marks9 = opts9.map((_, i) => before9.answer.includes(String.fromCharCode(65 + i)));
+check('编辑页拿到的选项不带字母', opts9.join('|') === '快速排序|归并排序|堆排序|选择排序', opts9.join('|'));
+check('编辑页拿到的正确答案是 B', marks9.join(',') === 'false,true,false,false', marks9.join(','));
+
+// 用户的修改:B 改个字;删掉 C(堆排序);加一个插入排序;改成多选:A 快速排序、C 选择排序(原来是 D)都对
+opts9[1] = '归并排序(稳定)';
+opts9.splice(2, 1);
+marks9.splice(2, 1);
+opts9.push('插入排序');
+marks9.push(false);
+marks9[0] = true;
+marks9[1] = false;
+marks9[2] = true;
+const edited9 = choiceCardOf(before9.title, '下列哪些排序**不**稳定?', '', opts9, marks9, true);
+db9.prepare(SQL_UPDATE_NOTE_TEXT).run(edited9.type, edited9.front, edited9.back, edited9.title,
+  edited9.options.join('\n'), edited9.answer, 200, before9.id);
+const after9 = note9('ch-1');
+check('**存回去以后还是选择卡**(不再变成问答卡)', after9.type === 1, `type=${after9.type}`);
+check('选项按新的顺序编号', after9.options === 'A. 快速排序\nB. 归并排序(稳定)\nC. 选择排序\nD. 插入排序',
+  JSON.stringify(after9.options));
+check('答案 AC', after9.answer === 'AC', after9.answer);
+check('标题、题型、标签都没变', after9.title === before9.title && after9.kind === 'choice' && after9.tags === before9.tags,
+  `${after9.title} / ${after9.kind} / ${after9.tags}`);
+const sched9 = db9.prepare(`SELECT stability, due, reps FROM scheduling WHERE card_id = ?`).get(card9) as {
+  stability: number; due: number; reps: number;
+};
+check('学习进度没动', sched9.stability === 4.2 && sched9.due === 9000 && sched9.reps === 3, JSON.stringify(sched9));
+
+// 问答卡(写作题):走 parseOneCard,标题保持原来的
+const es9 = note9('es-1');
+const qaParsed9 = parseOneCard('编辑测试', es9.front, '审题:坚持是手段,不是目的。');
+qaParsed9.title = titleAfterEdit(es9.title, es9.front, qaParsed9.title);
+db9.prepare(SQL_UPDATE_NOTE_TEXT).run(qaParsed9.type, qaParsed9.front, qaParsed9.back, qaParsed9.title,
+  qaParsed9.options.join('\n'), qaParsed9.answer, 200, es9.id);
+const es9b = note9('es-1');
+check('**问答卡改完,YAML 里单独写的标题还在**', es9b.title === '2015 年第 57 题 · 论说文', es9b.title);
+check('问答卡的题型 essay 还在', es9b.kind === 'essay', es9b.kind);
+
+// 导出 → 重新解析:改过的内容都在,id 不变
+const text9 = exportFrom(db9, r9.deckId);
+let back9: ParsedDeck | null = null;
+try {
+  back9 = parseYamlDeck(text9);
+} catch (e) {
+  check('改过的牌组导出后能解析', false, `${e}\n${text9}`);
+}
+if (back9 !== null) {
+  const c9 = back9.cards.find((c) => c.id === 'ch-1');
+  const e9 = back9.cards.find((c) => c.id === 'es-1');
+  check('改过的牌组导出后能解析', c9 !== undefined && e9 !== undefined);
+  if (c9 !== undefined && e9 !== undefined) {
+    check('导出的选择卡:选项、答案、题干', c9.type === 1 && c9.answer === 'AC'
+      && c9.options.map((o, i) => optionBody(o, i)).join('|') === '快速排序|归并排序(稳定)|选择排序|插入排序'
+      && c9.front === '下列哪些排序**不**稳定?', `${c9.answer} ${c9.options.join('|')}`);
+    check('导出的选择卡没有解析(选择卡可以不写)', c9.back === '', JSON.stringify(c9.back));
+    check('导出的两张卡:标题、题型、标签原样',
+      c9.title === '2015 年第 1 题 · 问题求解' && c9.kind === 'choice' && c9.tags.join(',') === '真题2015,数学'
+      && e9.title === '2015 年第 57 题 · 论说文' && e9.kind === 'essay' && e9.back === '审题:坚持是手段,不是目的。');
+  }
+}
+
+// 用没改过的原文件重新导入:内容哈希还是原文件的,导入认为这两张卡没变,在 App 里的修改留着。
+// (bug 文件里写的「重新导入能恢复」不成立;原文件里这张卡改了,才会用文件的版本覆盖)
+check('编辑不改内容哈希', after9.content_hash === before9.content_hash);
+const r9b = importParsed(db9, parseYamlDeck(editSrcText), 300);
+check('**原文件重新导入:不覆盖 App 里的修改**', r9b.unchanged === 2 && r9b.updated === 0 && note9('ch-1').answer === 'AC',
+  JSON.stringify(r9b));
+const changedText = editSrcText.replace('answer: B', 'answer: C');
+const r9c = importParsed(db9, parseYamlDeck(changedText), 400);
+check('原文件里这张卡变了:用文件的版本', r9c.updated === 1 && note9('ch-1').answer === 'C' && note9('ch-1').type === 1,
+  JSON.stringify(r9c));
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`);
 process.exit(fail === 0 ? 0 : 1);

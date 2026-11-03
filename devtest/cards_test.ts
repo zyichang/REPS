@@ -8,7 +8,7 @@
  */
 import { DatabaseSync } from 'node:sqlite';
 import { NoteType } from './Models';
-import { QuizifyError, parseOneCard } from './Quizify';
+import { QuizifyError, choiceCardOf, optionBody, parseOneCard, titleAfterEdit } from './Quizify';
 import {
   DDL, MIGRATIONS, SQL_AHEAD_CARDS, SQL_AHEAD_CARDS_IN_DECK, SQL_NEW_INTRODUCED_TODAY,
   SQL_COUNT_CARDS_IN_DECK,
@@ -65,6 +65,62 @@ expectReject('空正面被拒', '   ', '答案', '正面不能是空的');
 expectReject('空背面被拒', '题目', '  ', '背面不能是空的');
 expectReject('正面混入 +++ 被拒', '甲\n+++\n乙', '答案', '结构标记');
 expectReject('背面混入 *** 被拒', '题目', '甲\n***\n乙', '结构标记');
+
+// ================================================================ 1b. 编辑已有的卡
+console.log('\n=== 1b. 编辑选择卡:表单 → 卡片(.scratch/editor-choice-card-loss) ===');
+
+check('optionBody:「A. 栈」去掉字母', optionBody('A. 栈', 0) === '栈');
+check('optionBody:全角点、顿号、括号都认', optionBody('B．队列', 1) === '队列' && optionBody('C、树', 2) === '树'
+  && optionBody('（D）图', 3) === '图' && optionBody('(A) 栈', 0) === '栈');
+check('optionBody:「A. U.S. dollar」只去掉第一个编号', optionBody('A. U.S. dollar', 0) === 'U.S. dollar');
+check('**optionBody:字母和位置对不上就不动**(没写编号、本身以「U.」开头)',
+  optionBody('U.S. dollar', 0) === 'U.S. dollar' && optionBody('B. 甲', 0) === 'B. 甲');
+
+const single = choiceCardOf('2015 年第 1 题 · 问题求解', '\n下列哪种排序是稳定的?\n', '',
+  ['快速排序', '归并排序', ' 堆排序 '], [false, true, false], false);
+check('单选:卡片类型还是选择题', single.type === NoteType.Choice, `type=${single.type}`);
+check('单选:选项存成「A. 内容」,首尾空白去掉', single.options.join('|') === 'A. 快速排序|B. 归并排序|C. 堆排序',
+  single.options.join('|'));
+check('单选:答案 B', single.answer === 'B', single.answer);
+check('标题保持传进来的那个', single.title === '2015 年第 1 题 · 问题求解', single.title);
+check('题干去掉首尾空行', single.front === '下列哪种排序是稳定的?', JSON.stringify(single.front));
+check('解析可以不写', single.back === '');
+
+const multiCard = choiceCardOf('T', '哪些是线性结构?', '栈和队列。', ['栈', '树', '队列', '图\n(有向)'],
+  [true, false, true, false], true);
+check('多选:答案按字母顺序 AC', multiCard.answer === 'AC', multiCard.answer);
+check('选项里的换行换成空格(库里按换行分选项)', multiCard.options[3] === 'D. 图 (有向)', multiCard.options[3]);
+
+function expectChoiceReject(name: string, stem: string, opts: string[], marks: boolean[], multi: boolean,
+                            part: string): void {
+  try {
+    choiceCardOf('T', stem, '', opts, marks, multi);
+    check(name, false, '竟然通过了');
+  } catch (e) {
+    const ok = e instanceof QuizifyError && (e as QuizifyError).message.includes(part);
+    check(name, ok, `${e}`);
+  }
+}
+expectChoiceReject('题干空着被拒', '  \n ', ['甲', '乙'], [true, false], false, '题干不能是空的');
+expectChoiceReject('只有 1 个选项被拒', '题', ['甲'], [true], false, '至少要有 2 个选项');
+expectChoiceReject('空选项被拒,并且说出是哪个', '题', ['甲', '乙', '  '], [true, false, false], false, '选项 C 是空的');
+expectChoiceReject('没标正确答案被拒', '题', ['甲', '乙'], [false, false], false, '请标出正确答案');
+expectChoiceReject('多选只标了 1 个被拒', '题', ['甲', '乙', '丙'], [false, true, false], true, '至少要有 2 个正确答案');
+expectChoiceReject('单选标了 2 个被拒', '题', ['甲', '乙', '丙'], [true, true, false], false, '只能有 1 个正确答案');
+const many: string[] = [];
+for (let i = 0; i < 27; i++) {
+  many.push(`选项${i}`);
+}
+expectChoiceReject('27 个选项被拒(字母只有 A~Z)', '题', many, [true], false, '选项最多 26 个');
+
+// 问答卡照旧走 parseOneCard;标题按 titleAfterEdit 定
+const qaEdit = parseOneCard('d', '论说文:以「坚持」为话题……', '范文');
+check('parseOneCard 找不到 #### 时拿正面第一行当标题(所以要 titleAfterEdit)', qaEdit.title === '论说文:以「坚持」为话题……');
+check('**正面没写 ####:保持原来的标题**',
+  titleAfterEdit('2015 年第 57 题 · 论说文', '论说文:以「坚持」为话题……', qaEdit.title) === '2015 年第 57 题 · 论说文');
+const h4 = parseOneCard('d', '#### 栈 (1) 什么是栈?\n\n补充', '后进先出');
+check('正面写了 ####:用新标题(Quizify 的写法)', titleAfterEdit('旧标题', '#### 栈 (1) 什么是栈?\n\n补充', h4.title) === h4.title
+  && h4.title.length > 0, h4.title);
 
 // ================================================================ 2. SQL
 console.log('\n=== 2. 浏览 / 改写 / 删除的 SQL ===');

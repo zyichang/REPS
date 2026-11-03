@@ -901,3 +901,108 @@ export function parseOneCard(deck: string, front: string, back: string): ParsedC
   }
   return parsed.cards[0];
 }
+
+// ---------------------------------------------------------------- 编辑已有的卡
+
+/** 选择卡最多几个选项:字母 A~Z */
+export const MAX_OPTIONS: number = 26;
+
+/**
+ * 库里的第 index 个选项 → 编辑框里的内容:去掉开头的字母编号。
+ *
+ * YAML 导入的存成「A. 内容」;Quizify 导入的是原文,也可能写成「A．」「A、」「(A)」「（A）」。
+ * **只去掉和位置对得上的那个字母**:第 1 个选项只认 A。这样「U.S. dollar」这种
+ * 本身就以大写字母加点开头、又没写编号的选项不会被削掉一截。
+ */
+export function optionBody(stored: string, index: number): string {
+  const letter: string = String.fromCharCode(65 + index);
+  const t: string = stored.trim();
+  const m1 = t.match(/^[(（]([A-Z])[)）]\s*(.*)$/);
+  if (m1 !== null && m1[1] === letter) {
+    return m1[2];
+  }
+  const m2 = t.match(/^([A-Z])[.．、:：]\s*(.*)$/);
+  if (m2 !== null && m2[1] === letter) {
+    return m2[2];
+  }
+  return t;
+}
+
+/**
+ * 编辑页上的一张选择卡 → ParsedCard,交给 Database.updateNoteText 存回去。
+ *
+ * - 卡片类型保持选择题。编辑页的正面只是题干,没有 `;;;` 块,所以**不能**走 parseOneCard ——
+ *   那样会按正面的写法把它判成问答卡,选项和答案一起丢掉(.scratch/editor-choice-card-loss)。
+ * - 选项存成「A. 内容」,和 YAML 导入一样;选项里的换行换成空格(库里的选项按换行分开存)。
+ * - 答案按字母顺序。单选恰好 1 个,多选至少 2 个 —— 学习页按答案长度区分单选和多选。
+ * - 解析可以不写:YAML 里选择题的 back 本来就是可选的。
+ * - 标题由调用方传原来的。题型、标签不在这里:updateNoteText 不碰这两列,保存后原样保留。
+ *
+ * 内容不对时抛 QuizifyError,message 面向用户。
+ */
+export function choiceCardOf(title: string, stem: string, back: string, options: string[],
+                             correct: boolean[], multi: boolean): ParsedCard {
+  const front: string = trimBlankEdges(stem.split('\n'));
+  if (front.trim().length === 0) {
+    throw new QuizifyError(m('题干不能是空的', 'The question cannot be empty'), 0);
+  }
+  if (options.length < 2) {
+    throw new QuizifyError(m('选择题至少要有 2 个选项', 'A choice card needs at least 2 options'), 0);
+  }
+  if (options.length > MAX_OPTIONS) {
+    throw new QuizifyError(m(`选项最多 ${MAX_OPTIONS} 个`, `A choice card can have at most ${MAX_OPTIONS} options`), 0);
+  }
+  const stored: string[] = [];
+  let answer: string = '';
+  for (let i = 0; i < options.length; i++) {
+    const letter: string = String.fromCharCode(65 + i);
+    const body: string = options[i].replace(/[\r\n]+/g, ' ').trim();
+    if (body.length === 0) {
+      throw new QuizifyError(m(`选项 ${letter} 是空的:填上内容,或者删掉它`,
+        `Option ${letter} is empty: fill it in or delete it`), 0);
+    }
+    stored.push(`${letter}. ${body}`);
+    if (i < correct.length && correct[i]) {
+      answer += letter;
+    }
+  }
+  if (answer.length === 0) {
+    throw new QuizifyError(m('请标出正确答案', 'Mark the correct answer'), 0);
+  }
+  if (multi && answer.length < 2) {
+    throw new QuizifyError(m('多选题至少要有 2 个正确答案;只有一个的话,改成单选',
+      'A multiple-answer card needs at least 2 correct answers. If only one is correct, switch to single answer'), 0);
+  }
+  if (!multi && answer.length > 1) {
+    throw new QuizifyError(m('单选题只能有 1 个正确答案', 'A single-answer card can have only 1 correct answer'), 0);
+  }
+  return {
+    title: title,
+    key: cardKeyOf(title),
+    front: front,
+    back: trimBlankEdges(back.split('\n')),
+    options: stored,
+    answer: answer,
+    clozeCount: 0,
+    type: NoteType.Choice,
+    index: 0,
+    line: 0,
+    id: '',
+    tags: [],
+    kind: '',
+  };
+}
+
+/**
+ * 改完一张已有的卡,标题怎么定。正面里写了 `####` 标题(Quizify 的写法)就用新解析出的那个;
+ * 否则保持原来的标题 —— YAML 导入的卡标题是文件里单独写的,正面里没有,
+ * 不能拿正面第一行去顶替它(parseOneCard 找不到 `####` 时就是这么做的)。
+ */
+export function titleAfterEdit(storedTitle: string, front: string, parsedTitle: string): string {
+  for (const ln of front.split('\n')) {
+    if (/^\s*#{4}\s+/.test(ln)) {
+      return parsedTitle;
+    }
+  }
+  return storedTitle;
+}

@@ -110,6 +110,22 @@ export interface Dict {
   typeCloze: string;
   frontPlaceholder: string;
   backPlaceholder: string;
+  // ---- 编辑 / 预览选择卡 ----
+  stemLabel: string;
+  stemPlaceholder: string;
+  optionsLabel: string;
+  singleAnswer: string;
+  multiAnswer: string;
+  markHintSingle: string;
+  markHintMulti: string;
+  optionPlaceholder: string;
+  addOption: string;
+  deleteOption: string;          // %s 字母
+  markCorrect: string;           // %s 字母
+  explainLabel: string;
+  explainPlaceholder: string;
+  correctAnswerIs: string;       // %s 字母
+  letterSep: string;
 
   // ---- 我的 ----
   meTitle: string;
@@ -342,6 +358,13 @@ const ZH: Dict = {
   typeQA: '问答', typeChoice: '选择', typeCloze: '挖空',
   frontPlaceholder: '题目。{{答案}} 是挖空,;;; 块是选择题',
   backPlaceholder: '答案或解析',
+  stemLabel: '题干', stemPlaceholder: '题目',
+  optionsLabel: '选项', singleAnswer: '单选', multiAnswer: '多选',
+  markHintSingle: '点字母标出正确答案', markHintMulti: '点字母标出所有正确答案',
+  optionPlaceholder: '选项内容', addOption: '添加选项',
+  deleteOption: '删除选项 %s', markCorrect: '把 %s 标为正确答案',
+  explainLabel: '解析(可以不写)', explainPlaceholder: '为什么选这个答案',
+  correctAnswerIs: '正确答案:%s', letterSep: '、',
   
   
 
@@ -519,6 +542,13 @@ const EN: Dict = {
   typeQA: 'Q&A', typeChoice: 'Choice', typeCloze: 'Cloze',
   frontPlaceholder: 'Question. {{answer}} is a blank, a ;;; block is multiple choice',
   backPlaceholder: 'Answer or explanation',
+  stemLabel: 'Question', stemPlaceholder: 'The question',
+  optionsLabel: 'Options', singleAnswer: 'Single answer', multiAnswer: 'Multiple answers',
+  markHintSingle: 'Tap a letter to mark the correct answer', markHintMulti: 'Tap letters to mark every correct answer',
+  optionPlaceholder: 'Option text', addOption: 'Add option',
+  deleteOption: 'Delete option %s', markCorrect: 'Mark %s as correct',
+  explainLabel: 'Explanation (optional)', explainPlaceholder: 'Why this answer is right',
+  correctAnswerIs: 'Correct answer: %s', letterSep: ', ',
   
   
 

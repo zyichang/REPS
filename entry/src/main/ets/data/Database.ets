@@ -118,6 +118,8 @@ function readBrowseRow(rs: relationalStore.ResultSet): BrowseRow {
     title: rs.getString(rs.getColumnIndex('title')),
     front: rs.getString(rs.getColumnIndex('front')),
     back: rs.getString(rs.getColumnIndex('back')),
+    options: rs.getString(rs.getColumnIndex('options')),
+    answer: rs.getString(rs.getColumnIndex('answer')),
     due: rs.getLong(rs.getColumnIndex('due')),
     reps: rs.getLong(rs.getColumnIndex('reps')),
   };
