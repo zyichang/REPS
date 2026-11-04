@@ -132,6 +132,11 @@ export interface Dict {
   deleteCardTitle: string;
   deleteCardBody: string;        // %s 卡片摘要
   duplicatedAs: string;          // %s 副本标题
+  // ---- 编辑页离开前 ----
+  unsavedTitle: string;
+  unsavedBody: string;
+  discardChanges: string;
+  keepEditing: string;
 
   // ---- 我的 ----
   meTitle: string;
@@ -375,6 +380,8 @@ const ZH: Dict = {
   deleteCardTitle: '删除这张卡?',
   deleteCardBody: '「%s」和它的学习进度会删掉,不能撤销。以前的复习记录照常计入统计。',
   duplicatedAs: '已复制为「%s」',
+  unsavedTitle: '有改动没有保存', unsavedBody: '需要保存吗?还是放弃?',
+  discardChanges: '放弃', keepEditing: '继续编辑',
   
   
 
@@ -563,6 +570,8 @@ const EN: Dict = {
   deleteCardTitle: 'Delete this card?',
   deleteCardBody: '"%s" and its progress will be deleted. This can\'t be undone. Past reviews still count in your stats.',
   duplicatedAs: 'Duplicated as "%s"',
+  unsavedTitle: 'You have unsaved changes', unsavedBody: 'Save them or discard them?',
+  discardChanges: 'Discard', keepEditing: 'Keep editing',
   
   
 

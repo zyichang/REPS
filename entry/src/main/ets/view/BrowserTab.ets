@@ -14,6 +14,7 @@
  */
 
 import { common } from '@kit.AbilityKit';
+import { UIContext } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import {
   MAX_OPTIONS, ParsedCard, QuizifyError, choiceCardOf, optionBody, parseOneCard, renderCloze, titleAfterEdit,
@@ -88,6 +89,38 @@ class EditArgs {
     a.answer = r.answer;
     return a;
   }
+}
+
+/**
+ * 编辑页有没有没保存的改动(.scratch/browse-focus-and-row-actions 第 3 点)。
+ * 浏览页要换掉右栏之前问它:点别的卡、切换牌组、点「+」新建、复制后打开副本。
+ * 编辑页出现时登记、消失时注销;同一时间只有一个编辑页
+ */
+class EditGuard {
+  /** 登记的是哪个编辑页;0 = 没有 */
+  owner: number = 0;
+  dirty: () => boolean = (): boolean => false;
+  /** 保存(只写库,不离开)。成功返回 true;失败返回 false,留在编辑页显示原因 */
+  save: () => boolean = (): boolean => true;
+  /** 放弃改动 */
+  discard: () => void = (): void => {};
+}
+
+const editGuard: EditGuard = new EditGuard();
+let editorSeq: number = 0;
+
+/** 「有改动没有保存,需要保存吗?还是放弃?」三个按钮:继续编辑 / 放弃 / 保存。点框外 = 继续编辑 */
+function askUnsaved(ui: UIContext, lang: string, onSave: () => void, onDiscard: () => void): void {
+  ui.showAlertDialog({
+    title: L(lang).unsavedTitle,
+    message: L(lang).unsavedBody,
+    autoCancel: true,
+    buttons: [
+      { value: L(lang).keepEditing, fontColor: '#8A8A8E', action: () => {} },
+      { value: L(lang).discardChanges, fontColor: '#E5544B', action: onDiscard },
+      { value: L(lang).save, fontColor: '#2563EB', action: onSave },
+    ],
+  });
 }
 
 /** 路由表:必须是顶层 @Builder(strict 模式不接受内联 lambda) */
@@ -211,6 +244,27 @@ export struct BrowserTab {
   }
 
   /**
+   * 右栏要换成别的内容之前:编辑页有没保存的改动,就先问一句(保存 / 放弃 / 继续编辑)。
+   * 选「保存」但保存失败(比如题干空了),留在编辑页,不换
+   */
+  private guardThen(go: () => void): void {
+    if (editGuard.owner === 0 || !editGuard.dirty()) {
+      go();
+      return;
+    }
+    askUnsaved(this.getUIContext(), this.lang,
+      () => {
+        if (editGuard.save()) {
+          go();
+        }
+      },
+      () => {
+        editGuard.discard();
+        go();
+      });
+  }
+
+  /**
    * 切换牌组(Select 的第 index 项;0 = 全部牌组)。分栏时焦点换成这个牌组上次看的那张,没看过就第一张。
    * 记下的那张可能在第二、三页:按当时加载的行数一起加载,才找得到、滚得到它。单栏时只换列表
    */
@@ -219,7 +273,8 @@ export struct BrowserTab {
     const memo: FocusMemo | undefined = this.focusMemo.get(this.filterDeck);
     this.reload(isSplit(this.bp) && memo !== undefined ? memo.loaded : 0);
     if (isSplit(this.bp)) {
-      this.focusCurrentDeck();
+      // 编辑页有没保存的改动:先问;选「继续编辑」的话列表照样换成新牌组,右栏留着编辑页
+      this.guardThen(() => this.focusCurrentDeck());
     }
   }
 
@@ -291,7 +346,7 @@ export struct BrowserTab {
       if (isSplit(this.bp)) {
         const row: BrowseRow | null = db.browseRow(copy.cardId);
         if (row !== null) {
-          this.openRow(row);
+          this.guardThen(() => this.openRow(row));
         }
       }
     } catch (e) {
@@ -500,7 +555,7 @@ export struct BrowserTab {
     // 分栏时右栏正在预览的那张用浅蓝底标出来
     .backgroundColor(isSplit(this.bp) && this.rowAt(i).cardId === this.openCard ? '#EAF1FE' : Color.White)
     .borderRadius(10)
-    .onClick(() => this.openPreview(i))
+    .onClick(() => this.guardThen(() => this.openPreview(i)))
   }
 
   /** 左滑露出的两个按钮。**只接常量下标** */
@@ -542,7 +597,7 @@ export struct BrowserTab {
           .fontSize(30).fontColor('#3B82F6')
           .width(44).height(44).textAlign(TextAlign.Center)
           .accessibilityText(L(this.lang).newCardTitle)
-          .onClick(() => this.openNew())
+          .onClick(() => this.guardThen(() => this.openNew()))
       }
       .width('90%').constraintSize({ maxWidth: MAX_COL }).margin({ top: 16, bottom: 10 })
 
@@ -755,6 +810,10 @@ struct CardEditPage {
    * 打字时不变,输入框不会被重建、不会丢焦点
    */
   @State private optGen: number = 0;
+  /** 打开时表单的样子:离开前和它比,判断有没有没保存的改动 */
+  private initial: string = '';
+  /** 在 editGuard 里登记的编号 */
+  private guardId: number = 0;
 
   aboutToAppear(): void {
     this.front = this.args.front;
@@ -782,6 +841,52 @@ struct CardEditPage {
     } catch (e) {
       this.error = fmt(L(this.lang).readFailed, `${e}`);
     }
+    this.initial = this.snapshot();
+    this.guardId = ++editorSeq;
+    editGuard.owner = this.guardId;
+    editGuard.dirty = (): boolean => this.isDirty();
+    editGuard.save = (): boolean => this.persist();
+    editGuard.discard = (): void => this.markClean();
+  }
+
+  aboutToDisappear(): void {
+    // 只注销自己:右栏整栈替换时,新编辑页的 aboutToAppear 可能先于旧的这一句
+    if (editGuard.owner === this.guardId) {
+      editGuard.owner = 0;
+      editGuard.dirty = (): boolean => false;
+      editGuard.save = (): boolean => true;
+      editGuard.discard = (): void => {};
+    }
+  }
+
+  /** 表单内容压成一串,用来比较。牌组不算:新建时只换了牌组、什么都没写,不算改动 */
+  private snapshot(): string {
+    return [this.front, this.back, this.opts.join('\u0001'), this.correct.join(','), `${this.multi}`].join('\u0000');
+  }
+
+  private isDirty(): boolean {
+    return this.snapshot() !== this.initial;
+  }
+
+  private markClean(): void {
+    this.initial = this.snapshot();
+  }
+
+  /**
+   * 系统返回、手势返回、标题栏的返回箭头。没改动:返回 false,Navigation 照常弹栈;
+   * 有改动:先问「保存 / 放弃 / 继续编辑」,拦下这次返回
+   */
+  private onBack(): boolean {
+    if (!this.isDirty()) {
+      return false;
+    }
+    askUnsaved(this.getUIContext(), this.lang,
+      () => { this.save(); },
+      () => {
+        this.markClean();
+        this.stack?.pop();
+      });
+    return true;
   }
 
   private isNew(): boolean {
@@ -897,7 +1002,6 @@ struct CardEditPage {
 
   /** 新建之后回到浏览列表(分栏时右栏由列表自动补上焦点卡) */
   private finish(): void {
-    appStore().bump();
     this.stack?.clear();
   }
 
@@ -906,7 +1010,6 @@ struct CardEditPage {
    * 列表的高亮也不丢。预览页的 row 是入参快照,只能整页替换。
    */
   private backToPreview(cardId: number): void {
-    appStore().bump();
     const st = this.stack;
     if (st === null) {
       return;
@@ -918,11 +1021,29 @@ struct CardEditPage {
     }
   }
 
-  private save(): void {
+  /** 保存并离开:新建的回到浏览列表,改已有的卡回到它的预览。成功返回 true;失败留下、显示原因,返回 false */
+  private save(): boolean {
+    if (!this.persist()) {
+      return false;
+    }
+    if (this.isNew()) {
+      this.finish();
+    } else {
+      this.backToPreview(this.args.cardId);
+    }
+    return true;
+  }
+
+  /**
+   * 只校验并写库,**不离开编辑页**。浏览页换右栏之前问「保存吗」用它(editGuard.save):
+   * 接下来要打开的页面由浏览页自己换上。要是这里先回到预览、浏览页紧接着又换一次右栏,
+   * 同一帧里改两次页面栈,Navigation 会把旧的编辑页节点拿来复用,看起来像什么都没换(模拟器上实测)
+   */
+  private persist(): boolean {
     const name: string = this.deckName();
     if (name.length === 0) {
       this.error = L(this.lang).needDeckFirst;
-      return;
+      return false;
     }
     let parsed: ParsedCard;
     try {
@@ -938,7 +1059,7 @@ struct CardEditPage {
       }
     } catch (e) {
       this.error = e instanceof QuizifyError ? e.message : fmt(L(this.lang).importFailed, `${e}`);
-      return;
+      return false;
     }
     try {
       const db = appStore().getDb();
@@ -947,16 +1068,18 @@ struct CardEditPage {
         // 同一牌组里标识键重复会撞上 notes.fingerprint 的 UNIQUE:先问一声,给出能看懂的提示
         if (db.hasCardKey(name, parsed.key)) {
           this.error = fmt(L(this.lang).dupCardKey, parsed.key);
-          return;
+          return false;
         }
         db.insertManualCard(this.deckId, name, parsed, now);
-        this.finish();
       } else {
         db.updateNoteText(this.args.noteId, parsed, now);
-        this.backToPreview(this.args.cardId);
       }
+      this.markClean();
+      appStore().bump();
+      return true;
     } catch (e) {
       this.error = fmt(L(this.lang).saveFailed, `${e}`);
+      return false;
     }
   }
 
@@ -1114,5 +1237,6 @@ struct CardEditPage {
     .title(this.isNew() ? L(this.lang).newCardTitle : L(this.lang).editCardTitle)
     .backgroundColor('#F2F2F7')
     .onReady((ctx: NavDestinationContext) => { this.stack = ctx.pathStack; })
+    .onBackPressed((): boolean => this.onBack())
   }
 }
