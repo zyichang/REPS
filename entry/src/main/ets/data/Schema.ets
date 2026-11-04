@@ -843,6 +843,24 @@ export const SQL_UPDATE_NOTE_TEXT: string =
   `UPDATE notes SET type = ?, front = ?, back = ?, title = ?, options = ?, answer = ?,
           updated_at = ? WHERE id = ?`;
 
+/**
+ * 复制一张卡要读的内容(浏览页左滑「复制」)。排期、流水都不读:副本是一张新卡。
+ * 列名照抄,Database.duplicateNote 按列名取
+ */
+export const SQL_NOTE_FOR_COPY: string =
+  `SELECT n.deck_id, d.name AS deck_name, n.type, n.kind, n.title, n.front, n.back, n.options, n.answer, n.tags
+     FROM notes n JOIN decks d ON d.id = n.deck_id
+    WHERE n.id = ?`;
+
+/** 一个牌组里所有卡的标题:复制时给副本挑一个没被占用的 (n) */
+export const SQL_DECK_TITLES: string = `SELECT title FROM notes WHERE deck_id = ?`;
+
+/** 复制出来的那张卡 */
+export interface CopiedCard {
+  cardId: number;
+  title: string;
+}
+
 /** 删一条笔记要先删子表 —— 本库没有开外键级联。复习流水保留(ADR-0005) */
 export const SQL_DELETE_NOTE_SCHED: string =
   `DELETE FROM scheduling WHERE card_id IN (SELECT id FROM cards WHERE note_id = ?)`;

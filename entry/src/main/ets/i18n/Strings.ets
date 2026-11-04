@@ -126,6 +126,12 @@ export interface Dict {
   explainPlaceholder: string;
   correctAnswerIs: string;       // %s 字母
   letterSep: string;
+  // ---- 浏览列表左滑 ----
+  actDuplicate: string;
+  actDeleteCard: string;
+  deleteCardTitle: string;
+  deleteCardBody: string;        // %s 卡片摘要
+  duplicatedAs: string;          // %s 副本标题
 
   // ---- 我的 ----
   meTitle: string;
@@ -365,6 +371,10 @@ const ZH: Dict = {
   deleteOption: '删除选项 %s', markCorrect: '把 %s 标为正确答案',
   explainLabel: '解析(可以不写)', explainPlaceholder: '为什么选这个答案',
   correctAnswerIs: '正确答案:%s', letterSep: '、',
+  actDuplicate: '复制', actDeleteCard: '删除',
+  deleteCardTitle: '删除这张卡?',
+  deleteCardBody: '「%s」和它的学习进度会删掉,不能撤销。以前的复习记录照常计入统计。',
+  duplicatedAs: '已复制为「%s」',
   
   
 
@@ -549,6 +559,10 @@ const EN: Dict = {
   deleteOption: 'Delete option %s', markCorrect: 'Mark %s as correct',
   explainLabel: 'Explanation (optional)', explainPlaceholder: 'Why this answer is right',
   correctAnswerIs: 'Correct answer: %s', letterSep: ', ',
+  actDuplicate: 'Duplicate', actDeleteCard: 'Delete',
+  deleteCardTitle: 'Delete this card?',
+  deleteCardBody: '"%s" and its progress will be deleted. This can\'t be undone. Past reviews still count in your stats.',
+  duplicatedAs: 'Duplicated as "%s"',
   
   
 

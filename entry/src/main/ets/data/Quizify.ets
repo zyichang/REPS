@@ -1006,3 +1006,39 @@ export function titleAfterEdit(storedTitle: string, front: string, parsedTitle: 
   }
   return storedTitle;
 }
+
+// ---------------------------------------------------------------- 复制一张卡
+
+/** 没有标题的卡,复制时拿正面第一行当标题的基础:去掉 Markdown 标题符号和挖空括号,最多 40 个字 */
+function copyBaseOf(front: string): string {
+  for (const ln of front.split('\n')) {
+    let t: string = ln.replace(/^\s*#{1,6}\s+/, '').replace(/\{\{([^}]*)\}\}/g, '$1').replace(/\s+/g, ' ').trim();
+    if (t.length > 0) {
+      if (t.length > 40) {
+        t = t.substring(0, 40).trim();
+      }
+      return t;
+    }
+  }
+  return '';
+}
+
+/**
+ * 复制一张卡时副本的标题,像 Windows 复制文件:原标题后面加「 (2)」,被占用了就「 (3)」,依次往后。
+ * 原标题末尾已经是「(数字)」(比如复制的就是一张副本)就先去掉,所以副本的副本接着编号,不会变成「X (2) (2)」。
+ * 没有标题的卡拿正面第一行当基础。isTaken:这个标题在牌组里是不是已经被占用了(由调用方判断标题和标识键)。
+ */
+export function copyTitleOf(title: string, front: string, isTaken: (t: string) => boolean): string {
+  let base: string = title.trim();
+  if (base.length === 0) {
+    base = copyBaseOf(front);
+  }
+  base = base.replace(/\s*[(（]\d+[)）]$/, '');
+  for (let n = 2; n < 100000; n++) {
+    const t: string = base.length > 0 ? `${base} (${n})` : `(${n})`;
+    if (!isTaken(t)) {
+      return t;
+    }
+  }
+  return `${base} (${Date.now()})`;
+}

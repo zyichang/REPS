@@ -18,7 +18,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import {
   MAX_OPTIONS, ParsedCard, QuizifyError, choiceCardOf, optionBody, parseOneCard, renderCloze, titleAfterEdit,
 } from '../data/Quizify';
-import { BrowseRow, DeckRow, pickFocus, splitOptions } from '../data/Schema';
+import { BrowseRow, CopiedCard, DeckRow, pickFocus, splitOptions } from '../data/Schema';
 import { NoteType } from '../model/Models';
 import { L, LANG_ZH, fmt } from '../i18n/Strings';
 import { SK_LANG, SK_TICK, appStore } from '../store/AppStore';
@@ -245,7 +245,11 @@ export struct BrowserTab {
    * 单栏时照旧压栈。记下这是当前牌组的焦点
    */
   private openPreview(i: number): void {
-    const r: BrowseRow = this.rowAt(i);
+    this.openRow(this.rowAt(i));
+  }
+
+  /** 同上,直接给一行(复制出来的副本可能还不在已加载的列表里) */
+  private openRow(r: BrowseRow): void {
     if (r.cardId === 0) {
       return;
     }
@@ -257,6 +261,82 @@ export struct BrowserTab {
     }
     this.openCard = r.cardId;
     this.focusMemo.set(this.filterDeck, new FocusMemo(r.cardId, this.rows.length));
+  }
+
+  private toast(msg: string): void {
+    try {
+      this.getUIContext().getPromptAction().showToast({ message: msg, duration: 2500 });
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'toast 失败 %{public}s', `${e}`);
+    }
+  }
+
+  /**
+   * 左滑「复制」:同一牌组里加一张副本,标题加 (2)(Database.duplicateNote)。
+   * 分栏时右栏打开副本 —— 复制多半是为了接着改它;副本排在牌组最后,可能还不在已加载的列表里
+   */
+  private duplicateRow(i: number): void {
+    const r: BrowseRow = this.rowAt(i);
+    if (r.noteId === 0) {
+      return;
+    }
+    try {
+      const db = appStore().getDb();
+      const copy: CopiedCard | null = db.duplicateNote(r.noteId, Date.now());
+      if (copy === null) {
+        return;
+      }
+      appStore().bump();
+      this.toast(fmt(L(this.lang).duplicatedAs, copy.title));
+      if (isSplit(this.bp)) {
+        const row: BrowseRow | null = db.browseRow(copy.cardId);
+        if (row !== null) {
+          this.openRow(row);
+        }
+      }
+    } catch (e) {
+      this.status = fmt(L(this.lang).saveFailed, `${e}`);
+      hilog.error(DOMAIN, TAG, '复制失败 %{public}s', `${e}`);
+    }
+  }
+
+  /** 左滑「删除」:先确认。记下的是这一行本身,不是下标 —— 确认框开着的时候列表可能变了 */
+  private askDeleteRow(i: number): void {
+    const r: BrowseRow = this.rowAt(i);
+    if (r.noteId === 0) {
+      return;
+    }
+    this.getUIContext().showAlertDialog({
+      title: L(this.lang).deleteCardTitle,
+      message: fmt(L(this.lang).deleteCardBody, oneLine(r.title, r.front)),
+      autoCancel: true,
+      primaryButton: { value: L(this.lang).cancel, action: () => {} },
+      secondaryButton: { value: L(this.lang).actDeleteCard, fontColor: '#E5544B', action: () => this.doDeleteRow(r) },
+    });
+  }
+
+  /**
+   * 删掉这张卡(连同排期;复习流水保留,ADR-0005)。删的是右栏正在看的那张,就改看它下面那张,
+   * 删的是最后一张就看上面那张:先把焦点记好,重查时 reload → autoPreview 会按它补上右栏
+   */
+  private doDeleteRow(r: BrowseRow): void {
+    try {
+      if (r.cardId === this.openCard) {
+        const i: number = this.rows.findIndex((x: BrowseRow) => x.cardId === r.cardId);
+        const next: BrowseRow = i >= 0 && i + 1 < this.rows.length ? this.rows[i + 1]
+          : i > 0 ? this.rows[i - 1] : EMPTY_ROW;
+        if (next.cardId !== 0) {
+          this.focusMemo.set(this.filterDeck, new FocusMemo(next.cardId, this.rows.length));
+        } else {
+          this.focusMemo.delete(this.filterDeck);
+        }
+      }
+      appStore().getDb().deleteNote(r.noteId);
+      appStore().bump();
+    } catch (e) {
+      this.status = fmt(L(this.lang).saveFailed, `${e}`);
+      hilog.error(DOMAIN, TAG, '删除失败 %{public}s', `${e}`);
+    }
   }
 
   /**
@@ -423,6 +503,27 @@ export struct BrowserTab {
     .onClick(() => this.openPreview(i))
   }
 
+  /** 左滑露出的两个按钮。**只接常量下标** */
+  @Builder
+  rowActions(i: number) {
+    Row() {
+      Text(L(this.lang).actDuplicate)
+        .width(88).height('100%')
+        .fontSize(15).fontColor(Color.White).textAlign(TextAlign.Center)
+        .backgroundColor('#3B82F6')
+        .borderRadius({ topLeft: 10, bottomLeft: 10 })
+        .onClick(() => this.duplicateRow(i))
+      Text(L(this.lang).actDeleteCard)
+        .width(88).height('100%')
+        .fontSize(15).fontColor(Color.White).textAlign(TextAlign.Center)
+        .backgroundColor('#E5544B')
+        .borderRadius({ topRight: 10, bottomRight: 10 })
+        .onClick(() => this.askDeleteRow(i))
+    }
+    .height('100%')
+    .margin({ left: 8 })
+  }
+
   @Builder
   listPage() {
     Column() {
@@ -478,6 +579,8 @@ export struct BrowserTab {
             ListItem() {
               this.row(idx)
             }
+            // 像微信那样左滑:右边露出「复制」「删除」(编辑页不再有删除按钮)
+            .swipeAction({ end: { builder: () => { this.rowActions(idx) } } })
           }, (r: BrowseRow, idx: number) => `${this.gen}:${idx}:${r.cardId}`)
         }
         .cachedCount(6)
@@ -643,7 +746,6 @@ struct CardEditPage {
   @State private deckId: number = 0;
   @State private decks: DeckRow[] = [];
   @State private error: string = '';
-  @State private confirmDelete: boolean = false;
   /** 选择卡的表单:各选项的内容(不带字母)、哪几个是正确答案、单选还是多选 */
   @State private opts: string[] = [];
   @State private correct: boolean[] = [];
@@ -793,7 +895,7 @@ struct CardEditPage {
     return 0;
   }
 
-  /** 新建 / 删除之后回到浏览列表(分栏时右栏由列表自动补上第一张) */
+  /** 新建之后回到浏览列表(分栏时右栏由列表自动补上焦点卡) */
   private finish(): void {
     appStore().bump();
     this.stack?.clear();
@@ -858,15 +960,6 @@ struct CardEditPage {
     }
   }
 
-  private doDelete(): void {
-    try {
-      appStore().getDb().deleteNote(this.args.noteId);
-      this.finish();
-    } catch (e) {
-      this.error = fmt(L(this.lang).saveFailed, `${e}`);
-    }
-  }
-
   /** 放进哪个牌组。新建才能选;改已有卡片的牌组是「换组」,另一回事,暂不做 */
   @Builder
   deckRow() {
@@ -885,7 +978,7 @@ struct CardEditPage {
     .width('100%')
   }
 
-  /** 报错、保存、删除:两种表单共用 */
+  /** 报错、保存:两种表单共用。删除不在编辑页,在浏览列表上左滑(.scratch/browse-focus-and-row-actions) */
   @Builder
   actions() {
     if (this.error.length > 0) {
@@ -893,25 +986,7 @@ struct CardEditPage {
     }
 
     Button(L(this.lang).save).width('100%').height(44)
-      .onClick(() => this.save())
-
-    if (!this.isNew()) {
-      if (this.confirmDelete) {
-        Row({ space: 8 }) {
-          Button(L(this.lang).confirmDelete).layoutWeight(1).height(40)
-            .backgroundColor('#E5544B')
-            .onClick(() => this.doDelete())
-          Button(L(this.lang).cancelDelete).layoutWeight(1).height(40)
-            .backgroundColor('#E5E5EA').fontColor('#1C1C1E')
-            .onClick(() => { this.confirmDelete = false; })
-        }
-        .width('100%')
-      } else {
-        Button(L(this.lang).deleteCard).width('100%').height(40)
-          .backgroundColor('#F2F2F7').fontColor('#E5544B')
-          .onClick(() => { this.confirmDelete = true; })
-      }
-    }
+      .onClick(() => { this.save(); })
   }
 
   /**

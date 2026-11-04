@@ -45,9 +45,9 @@ import {
   SQL_TOMBSTONE_NOTE_CARDS, SQL_SYNC_CHECKINS_SINCE, SQL_SYNC_CHECKIN_TS, SQL_SYNC_DAYS_SINCE,
   SQL_SYNC_DECKS_SINCE, SQL_SYNC_DECK_BY_UUID, SQL_SET_DECK_UPDATED, SQL_TOMBSTONES_SINCE, SQL_TOMBSTONE_AT,
   SQL_PUT_TOMBSTONE, SQL_DROP_TOMBSTONE, SQL_SYNC_SCHED_SINCE, SQL_CARD_BY_SYNC_KEY, SQL_SET_SCHED_UPDATED,
-  SQL_DELETE_SCHED_BY_CARD, splitCardSyncKey,
+  SQL_DELETE_SCHED_BY_CARD, splitCardSyncKey, CopiedCard, SQL_DECK_TITLES, SQL_NOTE_FOR_COPY, splitOptions,
 } from './Schema';
-import { DeckMeta, ParsedCard, ParsedDeck, emptyMeta } from './Quizify';
+import { DeckMeta, ParsedCard, ParsedDeck, copyTitleOf, emptyMeta } from './Quizify';
 import { ExportCard, ExportDeck, exportYaml } from './YamlExport';
 import { util } from '@kit.ArkTS';
 
@@ -955,6 +955,73 @@ export class Database {
   insertManualCard(deckId: number, deckName: string, c: ParsedCard, now: number): number {
     const ids: number[] = this.insertNote(deckId, deckName, c, '手工添加', this.newUuid(), now);
     return ids.length > 0 ? ids[0] : 0;
+  }
+
+  /**
+   * 复制一张卡(浏览页左滑「复制」,.scratch/browse-focus-and-row-actions)。
+   * 同一牌组里加一张新卡:正面、背面、选项、答案、题型、标签都一样;**学习进度不复制**,副本是新卡。
+   * 标题像 Windows 复制文件那样加 (2)、(3)……(Quizify.copyTitleOf)。
+   * 标识键用整条新标题:cardKeyOf 会把「基础选择 (1) 题干 (2)」算回「基础选择 (1)」,和原卡一样,
+   * 插入就撞上 notes.fingerprint 的 UNIQUE。副本不在任何牌组文件里,键只要不重复就行。
+   * 原卡不在了返回 null。
+   */
+  duplicateNote(noteId: number, now: number): CopiedCard | null {
+    const rs = this.db().querySqlSync(SQL_NOTE_FOR_COPY, [noteId]);
+    let deckId: number = 0;
+    let deckName: string = '';
+    let type: number = 0;
+    let kind: string = '';
+    let title: string = '';
+    let front: string = '';
+    let back: string = '';
+    let options: string = '';
+    let answer: string = '';
+    let tags: string = '';
+    try {
+      if (!rs.goToFirstRow()) {
+        return null;
+      }
+      deckId = rs.getLong(rs.getColumnIndex('deck_id'));
+      deckName = rs.getString(rs.getColumnIndex('deck_name'));
+      type = rs.getLong(rs.getColumnIndex('type'));
+      kind = rs.getString(rs.getColumnIndex('kind'));
+      title = rs.getString(rs.getColumnIndex('title'));
+      front = rs.getString(rs.getColumnIndex('front'));
+      back = rs.getString(rs.getColumnIndex('back'));
+      options = rs.getString(rs.getColumnIndex('options'));
+      answer = rs.getString(rs.getColumnIndex('answer'));
+      tags = rs.getString(rs.getColumnIndex('tags'));
+    } finally {
+      rs.close();
+    }
+    const taken: Set<string> = new Set<string>();
+    const ts = this.db().querySqlSync(SQL_DECK_TITLES, [deckId]);
+    try {
+      while (ts.goToNextRow()) {
+        taken.add(ts.getString(ts.getColumnIndex('title')));
+      }
+    } finally {
+      ts.close();
+    }
+    const copyTitle: string = copyTitleOf(title, front,
+      (t: string): boolean => taken.has(t) || this.hasCardKey(deckName, t));
+    const c: ParsedCard = {
+      title: copyTitle,
+      key: copyTitle,
+      front: front,
+      back: back,
+      options: splitOptions(options),
+      answer: answer,
+      clozeCount: 0,
+      type: type === (NoteType.Choice as number) ? NoteType.Choice
+        : type === (NoteType.Cloze as number) ? NoteType.Cloze : NoteType.QA,
+      index: 0,
+      line: 0,
+      id: '',
+      tags: parseTagsColumn(tags),
+      kind: kind,
+    };
+    return { cardId: this.insertManualCard(deckId, deckName, c, now), title: copyTitle };
   }
 
   /**

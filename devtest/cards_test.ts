@@ -8,7 +8,7 @@
  */
 import { DatabaseSync } from 'node:sqlite';
 import { NoteType } from './Models';
-import { QuizifyError, choiceCardOf, optionBody, parseOneCard, titleAfterEdit } from './Quizify';
+import { QuizifyError, choiceCardOf, copyTitleOf, optionBody, parseOneCard, titleAfterEdit } from './Quizify';
 import {
   DDL, MIGRATIONS, SQL_AHEAD_CARDS, SQL_AHEAD_CARDS_IN_DECK, SQL_NEW_INTRODUCED_TODAY,
   SQL_COUNT_CARDS_IN_DECK,
@@ -121,6 +121,22 @@ check('**正面没写 ####:保持原来的标题**',
 const h4 = parseOneCard('d', '#### 栈 (1) 什么是栈?\n\n补充', '后进先出');
 check('正面写了 ####:用新标题(Quizify 的写法)', titleAfterEdit('旧标题', '#### 栈 (1) 什么是栈?\n\n补充', h4.title) === h4.title
   && h4.title.length > 0, h4.title);
+
+// ================================================================ 1c. 复制一张卡的标题
+console.log('\n=== 1c. 复制一张卡:标题像 Windows 那样加 (2)、(3)(.scratch/browse-focus-and-row-actions) ===');
+const takenIn = (list: string[]): ((t: string) => boolean) => (t: string): boolean => list.includes(t);
+check('第一次复制:加 (2)', copyTitleOf('机会成本', '', takenIn(['机会成本'])) === '机会成本 (2)');
+check('(2) 被占了:(3)', copyTitleOf('机会成本', '', takenIn(['机会成本', '机会成本 (2)'])) === '机会成本 (3)');
+check('**复制一张副本:接着编号,不会变成「X (2) (2)」**',
+  copyTitleOf('机会成本 (2)', '', takenIn(['机会成本', '机会成本 (2)'])) === '机会成本 (3)');
+check('全角括号的编号也认', copyTitleOf('题（2）', '', takenIn(['题（2）'])) === '题 (2)');
+check('编号中间有空洞时取第一个空着的', copyTitleOf('X', '', takenIn(['X', 'X (3)'])) === 'X (2)');
+check('没有标题:拿正面第一行(去掉 #### 和挖空括号)',
+  copyTitleOf('', '\n#### 程序的 {{顺序}} 结构\n第二行', takenIn([])) === '程序的 顺序 结构 (2)',
+  copyTitleOf('', '\n#### 程序的 {{顺序}} 结构\n第二行', takenIn([])));
+check('正面第一行太长:基础最多 40 个字', copyTitleOf('', 'x'.repeat(100), takenIn([])) === `${'x'.repeat(40)} (2)`);
+check('「基础选择 (1) …」这种中间有编号的标题:只在末尾加', copyTitleOf('基础选择 (1) 一个算法应该是()', '', takenIn([]))
+  === '基础选择 (1) 一个算法应该是() (2)');
 
 // ================================================================ 2. SQL
 console.log('\n=== 2. 浏览 / 改写 / 删除的 SQL ===');

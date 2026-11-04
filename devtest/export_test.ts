@@ -11,9 +11,13 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { SQL_EXPORT_DECK, SQL_EXPORT_NOTES, SQL_UPDATE_NOTE_TEXT, parseTagsColumn, parseTimeLimitsColumn, splitOptions } from './Schema';
 import {
-  DeckMeta, ParsedCard, ParsedDeck, choiceCardOf, emptyMeta, optionBody, parseOneCard, parseQuizify, titleAfterEdit,
+  SQL_DECK_TITLES, SQL_EXPORT_DECK, SQL_EXPORT_NOTES, SQL_INSERT_NOTE_V2, SQL_NOTE_FOR_COPY, SQL_UPDATE_NOTE_TEXT,
+  contentHashOf, fingerprintOf, parseTagsColumn, parseTimeLimitsColumn, splitOptions,
+} from './Schema';
+import {
+  DeckMeta, ParsedCard, ParsedDeck, cardKeyOf, choiceCardOf, copyTitleOf, emptyMeta, optionBody, parseOneCard,
+  parseQuizify, titleAfterEdit,
 } from './Quizify';
 import { parseYamlDeck } from './Yaml';
 import { ExportCard, ExportDeck, cardIdOf, exportYaml, optionText } from './YamlExport';
@@ -394,6 +398,78 @@ const changedText = editSrcText.replace('answer: B', 'answer: C');
 const r9c = importParsed(db9, parseYamlDeck(changedText), 400);
 check('原文件里这张卡变了:用文件的版本', r9c.updated === 1 && note9('ch-1').answer === 'C' && note9('ch-1').type === 1,
   JSON.stringify(r9c));
+
+// ---------------------------------------------------------------- 10
+console.log('=== 10. 复制一张卡(浏览页左滑「复制」)→ 导出(.scratch/browse-focus-and-row-actions) ===');
+const dupSrcText = ['reps: 2', 'meta:', '  id: 9a1b2c3d-0000-4000-8000-0000000000dd', 'deck: "复制测试"', 'cards:',
+  '  - id: d-1', '    type: choice', '    kind: choice', '    title: "基础选择 (1) 一个算法应该是()"',
+  '    front: "一个算法应该是()"', '    options: ["程序", "问题求解步骤的描述"]', '    answer: B', '    tags: [算法, 第一章]', ''].join('\n');
+const db10 = freshDb();
+const r10 = importParsed(db10, parseYamlDeck(dupSrcText), 100);
+const src10 = (db10.prepare(`SELECT id FROM notes WHERE uuid = ?`).get(`${r10.deckUuid}/d-1`) as { id: number }).id;
+const srcCard10 = (db10.prepare(`SELECT id FROM cards WHERE note_id = ?`).get(src10) as { id: number }).id;
+db10.exec(`INSERT INTO scheduling (card_id, stability, difficulty, reps, lapses, streak, last_review, due, phase, step,
+           first_seen, updated_at) VALUES (${srcCard10}, 5, 5, 4, 0, 4, 150, 9000, 2, 0, 120, 150)`);
+interface CopySrc10 {
+  deck_id: number; deck_name: string; type: number; kind: string; title: string; front: string; back: string;
+  options: string; answer: string; tags: string;
+}
+/** 与 Database.duplicateNote 一步一步对应(生产那边用 insertSync,列与 SQL_INSERT_NOTE_V2 相同) */
+function duplicate10(noteId: number, uuid: string): string {
+  const s = db10.prepare(SQL_NOTE_FOR_COPY).get(noteId) as unknown as CopySrc10;
+  const taken = new Set((db10.prepare(SQL_DECK_TITLES).all(s.deck_id) as Array<{ title: string }>).map((r) => r.title));
+  const fpTaken = (t: string): boolean => (db10.prepare(`SELECT COUNT(*) AS n FROM notes WHERE fingerprint = ?`)
+    .get(fingerprintOf(s.deck_name, t, 0)) as { n: number }).n > 0;
+  const title = copyTitleOf(s.title, s.front, (t) => taken.has(t) || fpTaken(t));
+  const opts = splitOptions(s.options);
+  const tags = parseTagsColumn(s.tags);
+  const r = db10.prepare(SQL_INSERT_NOTE_V2).run(s.deck_id, s.type, s.front, s.back, title, opts.join('\n'), s.answer,
+    '手工添加', fingerprintOf(s.deck_name, title, 0), uuid, 200,
+    contentHashOf(s.type, title, s.front, s.back, opts, s.answer, tags, s.kind), JSON.stringify(tags), s.kind);
+  db10.prepare(`INSERT INTO cards (note_id, ordinal, uuid, updated_at) VALUES (?, 0, ?, ?)`)
+    .run(Number(r.lastInsertRowid), uuid, 200);
+  return title;
+}
+check('cardKeyOf 会把副本的标题算回原卡的键(所以副本用整条标题当键)',
+  cardKeyOf('基础选择 (1) 一个算法应该是() (2)') === cardKeyOf('基础选择 (1) 一个算法应该是()'));
+let t10a = '';
+let t10b = '';
+let t10c = '';
+try {
+  t10a = duplicate10(src10, 'copy-1');
+  t10b = duplicate10(src10, 'copy-2');
+  const copy1 = (db10.prepare(`SELECT id FROM notes WHERE uuid = 'copy-1'`).get() as { id: number }).id;
+  t10c = duplicate10(copy1, 'copy-3');
+  check('**复制三次都插得进去**(没有撞上 fingerprint 的 UNIQUE)', true);
+} catch (e) {
+  check('**复制三次都插得进去**(没有撞上 fingerprint 的 UNIQUE)', false, `${e}`);
+}
+check('副本的标题:(2)、(3),复制副本得到 (4)', t10a === '基础选择 (1) 一个算法应该是() (2)'
+  && t10b === '基础选择 (1) 一个算法应该是() (3)' && t10c === '基础选择 (1) 一个算法应该是() (4)', `${t10a} / ${t10b} / ${t10c}`);
+const copies10 = db10.prepare(`SELECT type, kind, front, back, options, answer, tags FROM notes WHERE uuid LIKE 'copy-%'`)
+  .all() as unknown as Array<{ type: number; kind: string; front: string; options: string; answer: string; tags: string }>;
+check('副本的内容、题型、标签和原卡一样', copies10.length === 3 && copies10.every((c) => c.type === 1 && c.kind === 'choice'
+  && c.front === '一个算法应该是()' && c.options === 'A. 程序\nB. 问题求解步骤的描述' && c.answer === 'B'
+  && c.tags === '["算法","第一章"]'), JSON.stringify(copies10[0]));
+const sched10 = (db10.prepare(`SELECT COUNT(*) AS n FROM scheduling`).get() as { n: number }).n;
+check('**学习进度不复制**:只有原卡有排期', sched10 === 1, `${sched10}`);
+const text10 = exportFrom(db10, r10.deckId);
+let back10: ParsedDeck | null = null;
+try {
+  back10 = parseYamlDeck(text10);
+} catch (e) {
+  check('带副本的牌组导出后能解析', false, `${e}\n${text10}`);
+}
+if (back10 !== null) {
+  check('带副本的牌组导出后能解析,4 张卡、id 各不相同', back10.cards.length === 4
+    && new Set(back10.cards.map((c) => c.id)).size === 4, back10.cards.map((c) => c.id).join(','));
+  check('导出的副本带着新标题', back10.cards.map((c) => c.title).join('|')
+    === `基础选择 (1) 一个算法应该是()|${t10a}|${t10b}|${t10c}`);
+  // 导出的文件再导入一个空库(另一台设备):4 张都在
+  const dev10 = freshDb();
+  const r10b = importParsed(dev10, back10, 500);
+  check('导出的文件导入空库:4 张都进去', r10b.added === 4, JSON.stringify(r10b));
+}
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`);
 process.exit(fail === 0 ? 0 : 1);
