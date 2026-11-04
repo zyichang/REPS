@@ -1256,7 +1256,35 @@ export function browseCountArgs(deckId: number, query: string): Array<number | s
 /** SQL_BROWSE 的参数:过滤条件 + 第几页。page 从 0 起 */
 export function browseArgs(deckId: number, query: string, pageSize: number, page: number): Array<number | string> {
   const size: number = pageSize > 0 ? pageSize : 50;
-  return browseCountArgs(deckId, query).concat([size, page * size]);
+  return browseArgsAt(deckId, query, size, page * size);
+}
+
+/**
+ * SQL_BROWSE 的参数:过滤条件 + 从第 offset 行起取 limit 行。
+ * 浏览页按「已经加载了几行」续取、重查时保持已加载的行数,都用它 ——
+ * 不按页号算,每批张数的设置改了也不会漏行、重行。
+ */
+export function browseArgsAt(deckId: number, query: string, limit: number, offset: number): Array<number | string> {
+  const n: number = limit > 0 ? limit : 50;
+  const from: number = offset > 0 ? offset : 0;
+  return browseCountArgs(deckId, query).concat([n, from]);
+}
+
+/**
+ * 浏览页切换牌组后该看哪一张:记下的那张还在列表里就是它,否则第一张;列表是空的给 -1。
+ * remembered 为 0 表示这个牌组还没看过(.scratch/browse-focus-and-row-actions)
+ */
+export function pickFocus(cardIds: number[], remembered: number): number {
+  if (cardIds.length === 0) {
+    return -1;
+  }
+  if (remembered !== 0) {
+    const i: number = cardIds.indexOf(remembered);
+    if (i >= 0) {
+      return i;
+    }
+  }
+  return 0;
 }
 
 /** 浏览器的一行。比 CardBrief 多了它在哪个卡组 */

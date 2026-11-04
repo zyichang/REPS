@@ -17,7 +17,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { CardState, NoteType, ReviewLog } from '../model/Models';
 import {
   BrowseRow, CardBrief, DDL, META_BACKFILL_CHECKINS, MIGRATE_BACKFILL_CHECKINS, SQL_ANSWERED_SINCE, SQL_CHECKIN_DAYS,
-  SQL_INSERT_CHECKIN, SQL_IS_CHECKED_IN, SQL_META_GET, SQL_META_SET, dayAnchor, DayStat, SQL_BROWSE, SQL_BROWSE_COUNT, SQL_BROWSE_ONE, browseArgs, browseCountArgs, DeckCountRow, DeckCounts, DeckRow, LogPoint, SQL_DECK_COUNTS,
+  SQL_INSERT_CHECKIN, SQL_IS_CHECKED_IN, SQL_META_GET, SQL_META_SET, dayAnchor, DayStat, SQL_BROWSE, SQL_BROWSE_COUNT, SQL_BROWSE_ONE, browseArgsAt, browseCountArgs, DeckCountRow, DeckCounts, DeckRow, LogPoint, SQL_DECK_COUNTS,
   applyDeckLimits, dayIndex, dayStart, MIGRATE_FLATTEN_DECKS, ReviewCardRow,
   ReviewedCard, SQL_AHEAD_CARDS, SQL_AHEAD_CARDS_IN_DECK, SQL_COUNT_CARDS,
   SQL_COUNT_CARDS_IN_DECK, SQL_COUNT_DUE, SQL_COUNT_DUE_IN_DECK, SQL_COUNT_NEW,
@@ -555,8 +555,13 @@ export class Database {
    * 搜索词的转义在 browseArgs 里。
    */
   browse(deckId: number, query: string, pageSize: number, page: number): BrowseRow[] {
+    return this.browseAt(deckId, query, pageSize, page * (pageSize > 0 ? pageSize : 50));
+  }
+
+  /** 浏览器的列表:从第 offset 行起取 limit 行(续取、保持已加载的行数时用) */
+  browseAt(deckId: number, query: string, limit: number, offset: number): BrowseRow[] {
     const rs = this.db().querySqlSync(SQL_BROWSE,
-      browseArgs(deckId, query, pageSize, page) as Array<relationalStore.ValueType>);
+      browseArgsAt(deckId, query, limit, offset) as Array<relationalStore.ValueType>);
     const out: BrowseRow[] = [];
     try {
       while (rs.goToNextRow()) {

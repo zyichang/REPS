@@ -7,7 +7,7 @@
  *   3. 中文子串能搜到(SQLite 的 LIKE 对非 ASCII 只做精确匹配,子串本身没问题)
  */
 import { DatabaseSync } from 'node:sqlite';
-import { DDL, SQL_BROWSE, SQL_BROWSE_COUNT, SQL_BROWSE_ONE, browseArgs, browseCountArgs, escapeLike } from './Schema';
+import { DDL, SQL_BROWSE, SQL_BROWSE_COUNT, SQL_BROWSE_ONE, browseArgs, browseArgsAt, browseCountArgs, escapeLike, pickFocus } from './Schema';
 
 let pass = 0;
 let fail = 0;
@@ -132,6 +132,30 @@ const chList = (db.prepare(SQL_BROWSE).all(...browseArgs(2, '线性', 10, 0)) as
 check('SQL_BROWSE 的列表行也带上', chList !== undefined && chList.options === ch.options && chList.answer === 'AC');
 const qaRow = db.prepare(SQL_BROWSE_ONE).get(6) as unknown as { options: string; answer: string };
 check('问答卡的选项和答案是空串', qaRow.options === '' && qaRow.answer === '', JSON.stringify(qaRow));
+
+// 按偏移取:浏览页续取一批、重查时保持已加载的行数、切回牌组时按当时加载的行数(.scratch/browse-focus-and-row-actions)
+console.log('\n=== 6. 按偏移取列表;切换牌组后的焦点 ===');
+const allRows = db.prepare(SQL_BROWSE).all(...browseArgsAt(0, '', 1000, 0)) as unknown as Row[];
+const mid = db.prepare(SQL_BROWSE).all(...browseArgsAt(0, '', 3, 2)) as unknown as Row[];
+check('browseArgsAt:从第 2 行起取 3 行,和整表的第 2~4 行一样',
+  mid.map((r) => r.card_id).join() === allRows.slice(2, 5).map((r) => r.card_id).join(), mid.map((r) => r.card_id).join());
+check('browseArgs(第 3 页,每页 7 行)= browseArgsAt(7 行,从第 21 行起)',
+  JSON.stringify(browseArgs(1, 'x', 7, 3)) === JSON.stringify(browseArgsAt(1, 'x', 7, 21)));
+check('browseArgsAt:行数给 0 按 50,偏移给负数按 0',
+  JSON.stringify(browseArgsAt(0, '', 0, -5).slice(-2)) === JSON.stringify([50, 0]));
+// 续取不漏行、不重行:按已加载的行数续取,和一次取完一样
+const pieces: number[] = [];
+for (;;) {
+  const part = db.prepare(SQL_BROWSE).all(...browseArgsAt(0, '', 4, pieces.length)) as unknown as Row[];
+  if (part.length === 0) { break; }
+  for (const r of part) { pieces.push(r.card_id); }
+}
+check('按已加载的行数续取:不漏行、不重行', pieces.join() === allRows.map((r) => r.card_id).join());
+
+check('pickFocus:列表是空的 → -1', pickFocus([], 5) === -1);
+check('pickFocus:这个牌组还没看过 → 第一张', pickFocus([3, 4, 5], 0) === 0);
+check('pickFocus:记下的那张还在 → 回到它', pickFocus([3, 4, 5], 5) === 2);
+check('pickFocus:记下的那张不在了(删掉了、被搜索过滤掉)→ 第一张', pickFocus([3, 4, 5], 9) === 0);
 
 db.close();
 console.log(`\n===== 结果: ${pass} 通过 / ${fail} 失败 =====`);

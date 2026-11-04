@@ -18,7 +18,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import {
   MAX_OPTIONS, ParsedCard, QuizifyError, choiceCardOf, optionBody, parseOneCard, renderCloze, titleAfterEdit,
 } from '../data/Quizify';
-import { BrowseRow, DeckRow, splitOptions } from '../data/Schema';
+import { BrowseRow, DeckRow, pickFocus, splitOptions } from '../data/Schema';
 import { NoteType } from '../model/Models';
 import { L, LANG_ZH, fmt } from '../i18n/Strings';
 import { SK_LANG, SK_TICK, appStore } from '../store/AppStore';
@@ -43,6 +43,17 @@ const EMPTY_ROW: BrowseRow = {
   cardId: 0, noteId: 0, deckId: 0, deckName: '', type: 0,
   title: '', front: '', back: '', options: '', answer: '', due: 0, reps: 0,
 };
+
+/** 一个过滤条件上次看的那张卡,以及那时列表加载了几行(切回来时一起加载,才滚得到它) */
+class FocusMemo {
+  cardId: number = 0;
+  loaded: number = 0;
+
+  constructor(cardId: number, loaded: number) {
+    this.cardId = cardId;
+    this.loaded = loaded;
+  }
+}
 
 /** 编辑页的入参。noteId 为 0 表示新建 */
 class EditArgs {
@@ -159,11 +170,16 @@ export struct BrowserTab {
   @State private status: string = '';
   /** 当前过滤条件下一共多少张 —— 「N 张」显示的是它,不是已加载的行数 */
   @State private total: number = 0;
-  /** 已经加载到第几页(从 0 起)。刷到底时加载 page + 1 */
-  private page: number = 0;
   private loading: boolean = false;
   /** 列表上 key 的一部分:每次重查(换过滤 / 搜索)都换,LazyForEach 才会整体重建 */
   private gen: number = 0;
+  /**
+   * 每个过滤条件(牌组 id;0 = 全部牌组)上次看的是哪张卡、那时列表加载了几行。
+   * 只在内存里:退出 App 就没了,下次从第一张开始(.scratch/browse-focus-and-row-actions)
+   */
+  private focusMemo: Map<number, FocusMemo> = new Map<number, FocusMemo>();
+  /** 切换牌组后把列表滚到焦点那一行 */
+  private scroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
     // 右栏被返回关空了:去掉列表上的高亮
@@ -174,28 +190,59 @@ export struct BrowserTab {
         }
       },
     });
-    this.reload();
+    this.reload(0);
     this.autoPreview();
   }
 
+  /** 别处改了数据(作答、编辑、复制、删除、同步):重查,但保持已经加载的行数,列表不缩回第一页 */
   onTick(): void {
-    this.reload();
+    this.reload(this.rows.length);
   }
 
   onBreakpoint(): void {
     this.autoPreview();
   }
 
-  /** 刚进入分栏、右栏还空着:预览第一张。单栏时什么都不做 */
+  /** 刚进入分栏、右栏还空着:看这个牌组记下的那张(没记过就第一张)。单栏时什么都不做 */
   private autoPreview(): void {
     if (isSplit(this.bp) && this.stack.size() === 0 && this.rows.length > 0) {
-      this.openPreview(0);
+      this.focusCurrentDeck();
     }
   }
 
   /**
+   * 切换牌组(Select 的第 index 项;0 = 全部牌组)。分栏时焦点换成这个牌组上次看的那张,没看过就第一张。
+   * 记下的那张可能在第二、三页:按当时加载的行数一起加载,才找得到、滚得到它。单栏时只换列表
+   */
+  private switchDeck(index: number): void {
+    this.filterDeck = index === 0 ? 0 : this.decks[index - 1].id;
+    const memo: FocusMemo | undefined = this.focusMemo.get(this.filterDeck);
+    this.reload(isSplit(this.bp) && memo !== undefined ? memo.loaded : 0);
+    if (isSplit(this.bp)) {
+      this.focusCurrentDeck();
+    }
+  }
+
+  /** 右栏打开这个牌组的焦点卡,并把列表滚到它。列表是空的就清空右栏 */
+  private focusCurrentDeck(): void {
+    const memo: FocusMemo | undefined = this.focusMemo.get(this.filterDeck);
+    const ids: number[] = this.rows.map((r: BrowseRow) => r.cardId);
+    const i: number = pickFocus(ids, memo !== undefined ? memo.cardId : 0);
+    if (i < 0) {
+      this.stack.clear(false);
+      this.openCard = 0;
+      return;
+    }
+    this.openPreview(i);
+    // 列表可能刚换过数据还没排版,下一帧再滚
+    setTimeout(() => {
+      this.scroller.scrollToIndex(i, false, ScrollAlign.CENTER);
+    }, 0);
+  }
+
+  /**
    * 打开第 i 行的预览。分栏时右栏整栈替换成这一张(编辑页也一起关掉),
-   * 单栏时照旧压栈。
+   * 单栏时照旧压栈。记下这是当前牌组的焦点
    */
   private openPreview(i: number): void {
     const r: BrowseRow = this.rowAt(i);
@@ -209,9 +256,14 @@ export struct BrowserTab {
       this.stack.pushPath({ name: ROUTE_PREVIEW, param: r });
     }
     this.openCard = r.cardId;
+    this.focusMemo.set(this.filterDeck, new FocusMemo(r.cardId, this.rows.length));
   }
 
-  private reload(): void {
+  /**
+   * 重查列表。want:至少加载几行(0 = 一页)。十万张卡的库一次全读进来会卡死,所以平时只取一页,
+   * 刷到底再往后加(用户要求的分页加载);别处改了数据时按已加载的行数重查,切回牌组时按当时加载的行数。
+   */
+  private reload(want: number): void {
     const st = appStore();
     if (!st.isReady()) {
       return;
@@ -223,10 +275,9 @@ export struct BrowserTab {
       if (this.filterDeck !== 0 && this.decks.every((d: DeckRow) => d.id !== this.filterDeck)) {
         this.filterDeck = 0;
       }
-      // 只取第一页。十万张卡的库一次全读进来会卡死(用户要求的分页加载)
-      this.page = 0;
+      const limit: number = want > st.browsePage ? want : st.browsePage;
       this.total = db.browseCount(this.filterDeck, this.query);
-      this.rows = db.browse(this.filterDeck, this.query, st.browsePage, 0);
+      this.rows = db.browseAt(this.filterDeck, this.query, limit, 0);
       this.gen++;
       this.source.setData(this.rows);
       this.status = '';
@@ -235,7 +286,7 @@ export struct BrowserTab {
         this.stack.clear(false);
         this.openCard = 0;
       }
-      // 右栏空着(刚删光、刚从空库导入):补上第一张
+      // 右栏空着(刚删光、刚从空库导入):补上这个牌组的焦点卡
       this.autoPreview();
     } catch (e) {
       this.status = fmt(L(this.lang).readFailed, `${e}`);
@@ -243,7 +294,7 @@ export struct BrowserTab {
     }
   }
 
-  /** 刷到底:加载下一页,追加到列表末尾。已加载完或正在加载就什么都不做 */
+  /** 刷到底:从已加载的行数往后再取一批,追加到列表末尾。已加载完或正在加载就什么都不做 */
   private loadMore(): void {
     if (this.loading || this.rows.length >= this.total) {
       return;
@@ -251,14 +302,12 @@ export struct BrowserTab {
     this.loading = true;
     try {
       const st = appStore();
-      const more: BrowseRow[] = st.getDb().browse(this.filterDeck, this.query, st.browsePage, this.page + 1);
+      const more: BrowseRow[] = st.getDb().browseAt(this.filterDeck, this.query, st.browsePage, this.rows.length);
       if (more.length > 0) {
-        this.page++;
         this.rows = this.rows.concat(more);
         this.source.append(more);
       }
-      hilog.info(DOMAIN, TAG, '浏览加载第 %{public}d 页,已加载 %{public}d / %{public}d',
-        this.page, this.rows.length, this.total);
+      hilog.info(DOMAIN, TAG, '浏览续取一批,已加载 %{public}d / %{public}d', this.rows.length, this.total);
     } catch (e) {
       this.status = fmt(L(this.lang).readFailed, `${e}`);
     } finally {
@@ -404,14 +453,13 @@ export struct BrowserTab {
           .font({ size: 14 })
           .constraintSize({ maxWidth: '45%' })
           .onSelect((index: number) => {
-            this.filterDeck = index === 0 ? 0 : this.decks[index - 1].id;
-            this.reload();
+            this.switchDeck(index);
           })
         Search({ value: this.query, placeholder: L(this.lang).searchHint })
           .layoutWeight(1).height(40)
           .onChange((v: string) => {
             this.query = v;
-            this.reload();
+            this.reload(0);
           })
       }
       .width('90%').constraintSize({ maxWidth: MAX_COL }).margin({ bottom: 8 })
@@ -423,7 +471,7 @@ export struct BrowserTab {
         Text(this.decks.length === 0 ? L(this.lang).needDeckFirst : L(this.lang).noMatch)
           .fontSize(14).fontColor('#8A8A8E').margin({ top: 40 })
       } else {
-        List({ space: 8 }) {
+        List({ space: 8, scroller: this.scroller }) {
           // 一本书可能上千张卡:LazyForEach 只建可视区 + cachedCount 那几行。
           // key 带上 gen 与下标:行的 @Builder 按下标取数据,重查后必须整体重建
           LazyForEach(this.source, (r: BrowseRow, idx: number) => {
