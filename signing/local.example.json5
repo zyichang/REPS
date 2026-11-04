@@ -1,0 +1,30 @@
+// REPS 本机签名配置的样例。复制成同一文件夹下的 local.json5,再填入真实值。
+// signing/ 文件夹里除了本样例,全部被 .gitignore 排除,不会进版本库。
+//
+// hvigorfile.ts 读 signing/local.json5,通过 overrides.signingConfig 给构建签名;
+// 没有 local.json5 时构建照常成功,只是产出未签名的 HAP。
+//
+// 相对路径按 signing/ 文件夹解析。把 .cer / .p7b / .p12 和 material 文件夹都放进 signing/,
+// 整个文件夹拷到另一台电脑(放进那边克隆出来的 REPS/signing/)就能直接签名。也可以写绝对路径。
+//
+// 两个密码是 DevEco 加密后的十六进制串,不是明文。hvigor 用「.p12 所在文件夹/material」里的密钥解密,
+// 所以 material 文件夹必须和 .p12 放在同一个文件夹里,而且必须是加密这两个密码的那台电脑上的那一份。
+//
+// 每台电脑都要用同一套签名:另一张证书签的包装到已有 REPS 的设备上会报 9568332,
+// 只能卸载重装,而卸载会清掉那台设备上的数据(CONTEXT.md 陷阱 8)。
+// 换证书时(比如 2027-10-25 到期后):在 DevEco 里勾 "Automatically generate signature",
+// 把它写进 build-profile.json5 的 signingConfigs[0] 抄到 local.json5,
+// 把 C:\Users\<你>\.ohos\config\ 里对应的 .cer / .p7b / .p12 和 material 文件夹拷进 signing/,
+// 再把 build-profile.json5 改回 "signingConfigs": [],别把密码提交上去。
+{
+  "type": "HarmonyOS",
+  "material": {
+    "certpath": "default_REPS_<哈希>.cer",
+    "profile": "default_REPS_<哈希>.p7b",
+    "storeFile": "default_REPS_<哈希>.p12",
+    "storePassword": "<DevEco 加密后的十六进制串>",
+    "keyAlias": "debugKey",
+    "keyPassword": "<DevEco 加密后的十六进制串>",
+    "signAlg": "SHA256withECDSA"
+  }
+}

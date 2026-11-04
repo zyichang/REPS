@@ -1,0 +1,52 @@
+{
+  /*
+   * 签名不写在这里:本文件进版本库,签名材料不进。
+   *
+   * 签名材料(证书、profile、密钥库、加密后的密码)只放在本机的 signing/ 文件夹,
+   * 整个文件夹被 .gitignore 排除。hvigorfile.ts 读 signing/local.json5,
+   * 通过 hvigor 的 overrides.signingConfig 给构建签名。怎么配见 signing/local.example.json5。
+   * 没有 signing/local.json5 时照常构建,只是产出未签名的 HAP(能编译、能跑桌面测试,装不上设备)。
+   *
+   * 别用 DevEco 的 "Automatically generate signature":它会把 signingConfigs 和密码写回本文件,
+   * 而且签出来的是一张新证书,装到已有 REPS 的设备上会报 9568332(见 CONTEXT.md 陷阱 8)。
+   */
+  "app": {
+    "signingConfigs": [],
+    "products": [
+      {
+        "name": "default",
+        "targetSdkVersion": "26.0.0",
+        "compatibleSdkVersion": "26.0.0",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        }
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}

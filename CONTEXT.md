@@ -200,6 +200,7 @@ Error 子类型再抛,例如 `throw new QuizifyError(\`…: ${detail}\`, line)`�
 HarmonyOS 不允许换签名覆盖安装,只能先卸载再装(`hdc -t <设备> uninstall com.reps.app`),**这会清掉那台设备上的本地数据**,
 先用 `bm dump -n com.reps.app` 看 `fingerprint` / `installTime`,再用 sqlite3 看看库里有没有东西。
 换电脑(比如 Mac)用自动签名会生成新证书,同样会撞上这个,登录还要把新指纹加到 AGC。
+所以换电脑一律拷 `signing/` 文件夹,不用自动签名(见下文「代码地图」末尾的构建说明)。
 
 ## 还没决定
 
@@ -283,8 +284,14 @@ powershell.exe -NoProfile -Command "\$env:PATH='C:\Program Files\Huawei\DevEco S
 ```
 
 构建:`build.cmd assembleHap`。**退出码 1 但输出里有 `BUILD SUCCESSFUL` 属于正常**
-(PowerShell 把 stderr 上的警告当失败)。签名故意留空,要装真机需在 DevEco 里
-勾 "Automatically generate signature"。
+(PowerShell 把 stderr 上的警告当失败)。
+
+签名不进版本库。`build-profile.json5` 进版本库,但 `signingConfigs` 为空;`hvigorfile.ts` 读本机的
+`signing/local.json5`,通过 `overrides.signingConfig` 注入签名。整个 `signing/` 文件夹(证书、profile、
+密钥库、`material`、`local.json5`)被 .gitignore 排除,格式见 `signing/local.example.json5`。
+没有 `signing/local.json5` 也能构建,只是产出未签名的 HAP,装不上设备。
+换电脑时把这台的 `signing/` 整个拷过去;不要在 DevEco 里勾 "Automatically generate signature"
+(新证书会撞上陷阱 8,还会把密码写进 `build-profile.json5`)。
 
 ## 相关仓库
 

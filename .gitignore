@@ -10,12 +10,16 @@ build.log
 /.idea/
 *.iml
 
-# 签名配置:DevEco 自动生成的 signingConfigs 里含 keyPassword / storePassword 明文,
-# 绝不能进版本库。仓库里只保留 build-profile.json5.example。
-/build-profile.json5
-
-# 设备清单:会记录真机 UDID
-/signing/devices.json
+# 签名材料只放在本机的 signing/ 文件夹,绝不能进版本库:证书、profile、密钥库、
+# material(解密密码用的密钥)、local.json5(加密后的密码)、devices.json(真机 UDID)。
+# 只有说明样例 local.example.json5 例外。
+# build-profile.json5 进版本库,但里面不写签名(见它顶部的注释)。
+/signing/*
+!/signing/local.example.json5
+*.p12
+*.p7b
+*.cer
+*.csr
 
 # devtest 从生产源码同步出来的副本(每次跑 sync-and-test.mjs 都会重新生成)
 /devtest/srs.ts
