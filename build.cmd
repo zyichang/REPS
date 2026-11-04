@@ -2,11 +2,13 @@
 @rem ============================================================================
 @rem  REPS 命令行构建脚本
 @rem
-@rem  这台机器上直接跑 hvigorw 会踩 4 个坑,本脚本已全部绕开:
+@rem  这台机器上直接跑 hvigorw 会踩 5 个坑,本脚本已全部绕开:
 @rem   1. hvigor 启动时要 spawn powershell 检查 daemon 进程 -> 必须加 --no-daemon
 @rem   2. 用户级 npm registry 指向失效的二进制源 -> 覆盖为 registry.npmmirror.com
 @rem   3. 打包阶段需要 java,但不在 PATH 里 -> 补上 DevEco 自带 JBR
 @rem   4. 找不到 SDK -> 显式设置 DEVECO_SDK_HOME
+@rem   5. 新克隆的仓库没有 oh_modules,编译报找不到 @hw-agconnect/auth
+@rem      -> 先跑一次 ohpm install --all(DevEco 打开工程时的 Sync 会做这一步,命令行没人做)
 @rem
 @rem  用法:  build.cmd [任务名]     默认任务 assembleHap
 @rem         build.cmd clean
@@ -26,6 +28,13 @@ set "PATH=%JBR%;%NODE_HOME%;%PATH%"
 
 set "TASK=%~1"
 if "%TASK%"=="" set "TASK=assembleHap"
+
+if not exist "entry\oh_modules\" (
+  call "%DEVECO%\tools\ohpm\bin\ohpm.bat" install --all
+  if errorlevel 1 (
+    endlocal & exit /b 1
+  )
+)
 
 call "%DEVECO%\tools\hvigor\bin\hvigorw.bat" --no-daemon %TASK%
 set "RC=%ERRORLEVEL%"
