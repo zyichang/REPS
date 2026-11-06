@@ -4,7 +4,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { KeyboardAvoidMode, window } from '@kit.ArkUI';
 import { SK_BP, breakpointOf } from '../view/Layout';
 import { initAccount } from '../data/Account';
-import { syncNow } from '../data/SyncService';
+import { syncNow, syncOnBackground } from '../data/SyncService';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'REPS';
@@ -82,5 +82,7 @@ export default class EntryAbility extends UIAbility {
 
   onBackground(): void {
     hilog.info(DOMAIN, TAG, 'onBackground');
+    // 切到后台:把还没上传的进度传上去(锁屏、切 App 是换设备最常见的时刻)
+    syncOnBackground(this.context);
   }
 }

@@ -97,3 +97,31 @@ Status: ready-for-agent
 - 一台设备上已经打开的学习页，不因为另一台设备同步来的进度而改变：今天的集合在会话开始时定好（data-model §4）。
 
 ## Comments
+
+### 2026-11-06 · 已实现
+
+- 手机核对（只读，`hdc file recv` 拷了一份数据库）：手机就是 `8e3bb626`，一直是登录状态，
+  11-06 23:07:38 那次同步成功。手机上 10-27 以后只有 10-30 两次、11-02 一次、11-06 23:02 三次作答，
+  没有哪天学过 20 张，所以「20 张没传上去」并没有真的发生过。用户当晚实测：手机学 1 张、点同步，
+  平板第一次打开时自动同步，新卡从 75 变成 74。规则本身是对的，缺的是不点同步就不上传。
+- 「看完手机再决定」的两条都没有看到发生过，不做：手机没有掉线，也没有卡在「同步中…」的迹象。真遇到了再加。
+- 改动：
+  - `Schema.ets`：`leftToday(上限, 已用)`；`SQL_DECK_COUNTS` 多一列 `reviews_done_today`；`SQL_REVIEWS_DONE_TODAY`；
+    `applyDeckLimits` 的待复习也扣今天已复习；`SQL_DUE_TOUCHED_IDS` / `SQL_DUE_UNTOUCHED_IDS`。
+  - `Database.ets`：`deckCounts` 多读一列；`reviewsDoneToday`；`dueIdsForSession`（开始一轮时，今天答过、又到期的卡
+    不受复习上限约束，否则额度用完以后答错的卡今天回不来）。
+  - `StudyPage.ets`：落地页和开始一轮都用剩余复习额度；学完一轮（`Stage.Done`）就同步；
+    `aboutToDisappear` 那次同步的原因改叫「离开学习页」。
+  - `StudyTab.ets`：打卡（自动、手动）之后同步。
+  - `SyncService.ets`：正在同步时的请求不丢，这一轮结束后补跑；`syncOnBackground`：有没上传的改动才同步，
+    先申请短时任务，同步结束或快超时时取消。`EntryAbility.onBackground` 调它。
+  - 文档：`CONTEXT.md` 决定表加「每日上限跨设备」，算法要点 3、4；`docs/data-model.md` §4、§5.3；ADR-0006 第 4 条补注。
+- 测试：`deckcounts_test` 96 条，新增的有：复习上限扣今天已复习；开始一轮时学习步里的卡不受上限约束（额度为 0 也回来）；
+  另一台设备的排期写进来以后，新卡额度 75 → 55、对方额度 20 → 0、复习额度跟着减。`checkin_test` 跟着改参数。
+  桌面测试台 26 / 26，ArkTS 构建成功；`Database.ets` 多了 4 条「Function may throw exceptions」警告，
+  和这个文件里已有的 472 条是同一种（两条新查询）。
+- 手机 HLS-AL00（`8HG0226907014776`）：数据库先备份到 `C:\temp\reps-backup\phone-20261106-before-install`，
+  覆盖安装（同一张证书 `CD8A2530…551E`，没有卸载）。启动后日志「同步完成(启动)」，牌组列表正常（59 待学习、5 待复习）；
+  按 Home 切到后台，`onBackground` 2 毫秒返回（没有改动就不申请短时任务），进程没有崩。
+- 没在真机上测：学完一轮就上传、切到后台时上传。这两条都要真的答题，会改用户的学习记录，留给用户下次学的时候看：
+  学完一组停在完成页直接锁屏，再到平板上点「立即同步」或切回 REPS，数字应该跟着变。平板还没装新版。

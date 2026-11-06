@@ -115,10 +115,11 @@ const to5 = dayStart(dayIndex(N5) + 1);
 const MIN5 = 60 * 1000;
 const DAY5 = 24 * 60 * MIN5;
 function decks5(): DeckCounts[] {
-  const rows = db5.prepare(SQL_DECK_COUNTS).all(to5, from5, from5, from5, to5, from5, to5) as Array<Record<string, number>>;
+  const rows = db5.prepare(SQL_DECK_COUNTS)
+    .all(to5, from5, from5, from5, to5, from5, to5, from5, from5) as Array<Record<string, number>>;
   return rows.map((r) => applyDeckLimits({
     id: r.id, name: `${r.name}`, cards: r.cards, unlearned: r.unlearned, untouchedDue: r.untouched_due,
-    newToday: r.new_today, again: r.again, settled: r.settled,
+    newToday: r.new_today, again: r.again, settled: r.settled, reviewsDoneToday: r.reviews_done_today,
   }, 20, 200));
 }
 const answered5 = (): number => (db5.prepare(SQL_ANSWERED_SINCE).get(from5) as NRow).n;

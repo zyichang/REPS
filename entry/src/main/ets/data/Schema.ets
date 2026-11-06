@@ -713,6 +713,19 @@ export const SQL_NEW_INTRODUCED_TODAY: string =
      JOIN notes nt ON nt.id = c.note_id
     WHERE s.first_seen >= ? AND (? = 0 OR nt.deck_id = ?)`;
 
+/**
+ * 今天复习过的旧卡数:今天答过(`last_review >= 今日起点`)、而且今天之前就学过
+ * (`first_seen < 今日起点`)。复习剩余额度 = 复习上限 − 这个数,所以上限才真的是**每天**的;
+ * 早先没扣它,积压超过上限时做完一轮再开一轮,又会给满上限那么多张。
+ * 按张数算,一张卡今天答了几次都只算一张。今天新学的卡算在新卡里,不算在这里。
+ * 参数:今日起点、今日起点、卡组、卡组。列名必须叫 n。
+ */
+export const SQL_REVIEWS_DONE_TODAY: string =
+  `SELECT COUNT(*) AS n FROM scheduling s
+     JOIN cards c ON c.id = s.card_id
+     JOIN notes nt ON nt.id = c.note_id
+    WHERE s.last_review >= ? AND s.first_seen < ? AND (? = 0 OR nt.deck_id = ?)`;
+
 // ------------------------------------------------------------ 今日进度三段条
 
 /**
@@ -775,6 +788,29 @@ export const SQL_DUE_CARDS_IN_DECK: string =
      JOIN notes n ON n.id = c.note_id
      JOIN scheduling s ON s.card_id = c.id
     WHERE n.deck_id = ? AND s.due <= ?
+    ORDER BY s.due ASC LIMIT ?`;
+
+/**
+ * 开始一轮时取的到期卡分两种,只有第二种受复习上限约束:
+ *   - 今天答过、此刻又到期的(学习步、重学步里的卡):今天已经开了头,必须让它回来,
+ *     否则复习额度用完以后,答错的卡今天永远回不来,牌组一直显示「学习中」;
+ *   - 今天还没答过、此刻到期的:最多取「复习剩余额度」张。
+ * 都按 due 升序。参数:此刻、今日起点、卡组、卡组;第二条最后多一个上限。卡组 0 表示全部。
+ */
+export const SQL_DUE_TOUCHED_IDS: string =
+  `SELECT c.id AS card_id
+     FROM cards c
+     JOIN notes n ON n.id = c.note_id
+     JOIN scheduling s ON s.card_id = c.id
+    WHERE s.due <= ? AND s.last_review >= ? AND (? = 0 OR n.deck_id = ?)
+    ORDER BY s.due ASC`;
+
+export const SQL_DUE_UNTOUCHED_IDS: string =
+  `SELECT c.id AS card_id
+     FROM cards c
+     JOIN notes n ON n.id = c.note_id
+     JOIN scheduling s ON s.card_id = c.id
+    WHERE s.due <= ? AND s.last_review < ? AND (? = 0 OR n.deck_id = ?)
     ORDER BY s.due ASC LIMIT ?`;
 
 export const SQL_NEW_CARDS_IN_DECK: string =
@@ -1341,8 +1377,12 @@ export interface DeckRow {
  *   untouchedDue  = SQL_UNTOUCHED_DUE(不设上限):今日截止前到期、今天还没答过
  *   newToday      = SQL_NEW_INTRODUCED_TODAY:今天第一次见的卡
  *   again/settled = SQL_TODAY_PROGRESS 的灰 / 绿
+ *   reviewsDoneToday = SQL_REVIEWS_DONE_TODAY:今天复习过的旧卡
  *
- * 参数顺序:今日截止、今日起点、今日起点、今日起点、今日截止、今日起点、今日截止。
+ * 「今天」的几列都只看 scheduling,而 scheduling 随卡片同步:另一台设备上学过、复习过的卡,
+ * 同步过来以后也算进本机的今天(.scratch/cross-device-progress)。
+ *
+ * 参数顺序:今日截止、今日起点、今日起点、今日起点、今日截止、今日起点、今日截止、今日起点、今日起点。
  * 一律无编号 `?`(编号占位符在 node:sqlite 上不可靠,见 SQL_TODAY_PROGRESS)。
  */
 export const SQL_DECK_COUNTS: string =
@@ -1356,7 +1396,9 @@ export const SQL_DECK_COUNTS: string =
           SUM(CASE WHEN s.card_id IS NOT NULL AND s.last_review >= ? AND s.due < ?
                    THEN 1 ELSE 0 END) AS again,
           SUM(CASE WHEN s.card_id IS NOT NULL AND s.last_review >= ? AND s.due >= ?
-                   THEN 1 ELSE 0 END) AS settled
+                   THEN 1 ELSE 0 END) AS settled,
+          SUM(CASE WHEN s.card_id IS NOT NULL AND s.last_review >= ? AND s.first_seen < ?
+                   THEN 1 ELSE 0 END) AS reviews_done_today
      FROM decks d
      JOIN notes n ON n.deck_id = d.id
      JOIN cards c ON c.note_id = n.id
@@ -1375,6 +1417,8 @@ export interface DeckCountRow {
   newToday: number;
   again: number;
   settled: number;
+  /** 今天复习过的旧卡(今天答过、今天之前就学过),复习上限扣的就是它 */
+  reviewsDoneToday: number;
 }
 
 /** 牌组列表上显示的一行:已经按每日上限截过 */
@@ -1393,19 +1437,30 @@ export interface DeckCounts {
 }
 
 /**
+ * 今天还剩多少额度:上限 − 今天已经用掉的,不小于 0。
+ *
+ * 上限是本机的设置(不同步);「已经用掉的」按所有设备算 —— 设备上的数字表示今天**总共**
+ * 最多学几张。平板新卡 75、手机先学了 20,平板就只剩 55(.scratch/cross-device-progress)。
+ * 牌组列表、落地页、开始一轮都用这一个函数,三处口径不会分叉。
+ */
+export function leftToday(limit: number, used: number): number {
+  return limit > used ? limit - used : 0;
+}
+
+/**
  * 套上每日上限。**上限对每个卡组各算一份**(Anki 默认预设的行为):
  * 新卡额度 20 时,两个卡组各自能出 20 张,而不是合起来 20 张。
- * 新卡剩余额度 = 额度 − 本组今天已引入,和落地页的算法一字不差。
+ * 新卡剩余额度 = 额度 − 本组今天已引入;复习剩余额度 = 上限 − 本组今天已复习。
+ * 和落地页的算法一字不差。学习中的卡(今天答过、今天还会回来)不受上限约束。
  */
 export function applyDeckLimits(r: DeckCountRow, newPerDay: number, reviewLimit: number): DeckCounts {
-  const leftNew: number = newPerDay > r.newToday ? newPerDay - r.newToday : 0;
   return {
     id: r.id,
     name: r.name,
     cards: r.cards,
-    newCount: Math.min(r.unlearned, leftNew),
+    newCount: Math.min(r.unlearned, leftToday(newPerDay, r.newToday)),
     learnCount: r.again,
-    dueCount: Math.min(r.untouchedDue, reviewLimit < 0 ? 0 : reviewLimit),
+    dueCount: Math.min(r.untouchedDue, leftToday(reviewLimit, r.reviewsDoneToday)),
     settled: r.settled,
   };
 }

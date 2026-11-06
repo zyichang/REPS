@@ -46,6 +46,7 @@ import {
   SQL_SYNC_DECKS_SINCE, SQL_SYNC_DECK_BY_UUID, SQL_SET_DECK_UPDATED, SQL_TOMBSTONES_SINCE, SQL_TOMBSTONE_AT,
   SQL_PUT_TOMBSTONE, SQL_DROP_TOMBSTONE, SQL_SYNC_SCHED_SINCE, SQL_CARD_BY_SYNC_KEY, SQL_SET_SCHED_UPDATED,
   SQL_DELETE_SCHED_BY_CARD, splitCardSyncKey, CopiedCard, SQL_DECK_TITLES, SQL_NOTE_FOR_COPY, splitOptions,
+  SQL_REVIEWS_DONE_TODAY, SQL_DUE_TOUCHED_IDS, SQL_DUE_UNTOUCHED_IDS,
 } from './Schema';
 import { DeckMeta, ParsedCard, ParsedDeck, copyTitleOf, emptyMeta } from './Quizify';
 import { ExportCard, ExportDeck, exportYaml } from './YamlExport';
@@ -523,7 +524,7 @@ export class Database {
     const dayFrom: number = dayStart(today);
     const dayTo: number = dayStart(today + 1);
     const rs = this.db().querySqlSync(SQL_DECK_COUNTS,
-      [dayTo, dayFrom, dayFrom, dayFrom, dayTo, dayFrom, dayTo] as Array<relationalStore.ValueType>);
+      [dayTo, dayFrom, dayFrom, dayFrom, dayTo, dayFrom, dayTo, dayFrom, dayFrom] as Array<relationalStore.ValueType>);
     const out: DeckCounts[] = [];
     try {
       while (rs.goToNextRow()) {
@@ -536,6 +537,7 @@ export class Database {
           newToday: rs.getLong(rs.getColumnIndex('new_today')),
           again: rs.getLong(rs.getColumnIndex('again')),
           settled: rs.getLong(rs.getColumnIndex('settled')),
+          reviewsDoneToday: rs.getLong(rs.getColumnIndex('reviews_done_today')),
         };
         out.push(applyDeckLimits(row, newPerDay, reviewLimit));
       }
@@ -678,6 +680,24 @@ export class Database {
   newIntroducedToday(deckId: number, dayFrom: number): number {
     return this.scalar(SQL_NEW_INTRODUCED_TODAY,
       [dayFrom, deckId, deckId] as Array<relationalStore.ValueType>);
+  }
+
+  /** 今天复习过多少张旧卡。复习剩余额度 = 复习上限 − 这个数 */
+  reviewsDoneToday(deckId: number, dayFrom: number): number {
+    return this.scalar(SQL_REVIEWS_DONE_TODAY,
+      [dayFrom, dayFrom, deckId, deckId] as Array<relationalStore.ValueType>);
+  }
+
+  /**
+   * 开始一轮时的到期卡(见 Schema.SQL_DUE_TOUCHED_IDS):今天答过、又到期的全部在前,
+   * 今天还没答过的到期卡最多 reviewLeft 张在后。deckId 为 0 表示全部卡组。
+   */
+  dueIdsForSession(deckId: number, now: number, dayFrom: number, reviewLeft: number): number[] {
+    const touched: number[] = this.idColumn(this.db().querySqlSync(SQL_DUE_TOUCHED_IDS,
+      [now, dayFrom, deckId, deckId] as Array<relationalStore.ValueType>));
+    const untouched: number[] = this.idColumn(this.db().querySqlSync(SQL_DUE_UNTOUCHED_IDS,
+      [now, dayFrom, deckId, deckId, reviewLeft] as Array<relationalStore.ValueType>));
+    return touched.concat(untouched);
   }
 
   /** 今天答过的卡,最近的在前。一张卡答了多次也只出现一次 */

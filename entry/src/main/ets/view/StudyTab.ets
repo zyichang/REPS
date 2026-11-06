@@ -27,6 +27,7 @@ import { runImport } from './ImportAction';
 import { runExport } from './ExportAction';
 import { COLOR_DUE, COLOR_LEARN, COLOR_NEW, COLOR_ZERO } from './DeckColors';
 import { StudyPage } from './StudyPage';
+import { syncNow } from '../data/SyncService';
 
 /** 页面大标题。品牌名,各语言都写 REPS(中文应用名「刻意重复」只出现在桌面和关于里) */
 const BRAND: string = 'REPS';
@@ -204,6 +205,8 @@ export struct StudyTab {
       this.checkedIn = true;
       this.status = auto ? L(this.lang).checkInAuto : L(this.lang).checkInDone;
       appStore().bump();      // 统计页的学习天数 / 月历跟着变
+      // 打卡马上传上去,另一台设备才跟着显示已打卡(正在同步时会在那一轮之后补跑)
+      syncNow(this.getUIContext().getHostContext() as common.UIAbilityContext, auto ? '自动打卡' : '打卡', true);
     } catch (e) {
       this.status = fmt(L(this.lang).saveFailed, `${e}`);
     }

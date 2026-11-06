@@ -8,7 +8,7 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { clozeAnswers, renderCloze } from '../data/Quizify';
 import {
-  ReviewCardRow, ReviewedCard, TodayProgress, dayIndex, dayStart, parseTimeLimitsColumn, splitOptions,
+  ReviewCardRow, ReviewedCard, TodayProgress, dayIndex, dayStart, leftToday, parseTimeLimitsColumn, splitOptions,
 } from '../data/Schema';
 import { CardState, GRADE_COLOR, Grade, LearnPhase, NoteType } from '../model/Models';
 import { MarkupText } from './MarkupText';
@@ -225,9 +225,9 @@ export struct StudyPage {
        * 于是一张答错的卡进了灰,一分钟后又满足「当前到期」而同时算进白 ——
        * 结果灰在涨、白不降、总数飘。
        */
-      const untouchedDue: number = db.untouchedDueCount(deckId, dayTo, dayFrom, st.reviewLimit);
-      const usedNew: number = db.newIntroducedToday(deckId, dayFrom);
-      const leftNew: number = st.newPerDay > usedNew ? st.newPerDay - usedNew : 0;
+      const leftReview: number = leftToday(st.reviewLimit, db.reviewsDoneToday(deckId, dayFrom));
+      const untouchedDue: number = db.untouchedDueCount(deckId, dayTo, dayFrom, leftReview);
+      const leftNew: number = leftToday(st.newPerDay, db.newIntroducedToday(deckId, dayFrom));
       const untouchedNew: number = db.unlearnedCount(deckId, leftNew);
 
       /*
@@ -274,11 +274,12 @@ export struct StudyPage {
     const now: number = Date.now();
     const deckId: number = this.scopeDeck();
 
-    // 和落地页同一套口径:复习受上限约束,新卡受**当天剩余**额度约束
+    // 和落地页同一套口径:复习受**当天剩余**上限约束,新卡受**当天剩余**额度约束;
+    // 今天已经答过、又到期的卡(学习步里的)不受上限约束,见 Database.dueIdsForSession
     const dayFrom: number = dayStart(dayIndex(now));
-    const usedNew: number = db.newIntroducedToday(deckId, dayFrom);
-    const leftNew: number = st.newPerDay > usedNew ? st.newPerDay - usedNew : 0;
-    const due: number[] = db.dueCardIdsInDeck(deckId, now, st.reviewLimit);
+    const leftNew: number = leftToday(st.newPerDay, db.newIntroducedToday(deckId, dayFrom));
+    const leftReview: number = leftToday(st.reviewLimit, db.reviewsDoneToday(deckId, dayFrom));
+    const due: number[] = db.dueIdsForSession(deckId, now, dayFrom, leftReview);
     const fresh: number[] = db.newCardIdsInDeck(deckId, leftNew);
     this.queue = due.concat(fresh);
     this.answered = 0;
@@ -328,8 +329,8 @@ export struct StudyPage {
     this.finishCard();
     // 离开这个卡组:让牌组列表等页面按新进度重算
     appStore().bump();
-    // 学完一轮:把这一轮的进度传上去(不等结果,失败下次再来)
-    syncNow(this.getUIContext().getHostContext() as abilityCommon.UIAbilityContext, '学完一轮', true);
+    // 离开学习页:把进度传上去(不等结果,失败下次再来)。最后一张卡看解析的时间是上面才补上的
+    syncNow(this.getUIContext().getHostContext() as abilityCommon.UIAbilityContext, '离开学习页', true);
     // **必须解除沉浸**,否则切走之后标签栏再也不出现
     this.immersive = false;
   }
@@ -556,6 +557,9 @@ export struct StudyPage {
       this.stage = Stage.Done;
       this.publishDepth();
       appStore().bump();
+      // 学完一轮马上上传:停在这一页就锁屏或切走的话,离开学习页那次同步不会发生,
+      // 另一台设备就看不到这一轮(.scratch/cross-device-progress)
+      syncNow(this.getUIContext().getHostContext() as abilityCommon.UIAbilityContext, '学完一轮', true);
       return;
     }
     const id: number = this.queue.shift() as number;
